@@ -2,7 +2,7 @@ name: Deploy to GitHub Pages
 
 on:
   push:
-    branches: ["principal"] # Ou "principal", verifique o nome da sua branch
+    branches: ["principal"] # Usa o nome exato da sua branch
 
 permissions:
   contents: read
@@ -24,8 +24,8 @@ jobs:
         run: npm install
       - name: Build
         run: npm run build
-          env:
-            GEMINI_API_KEY: ${{secrets.GEMINI_API_KEY}}
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }} # Puxa a chave dos Segredos
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
@@ -34,7 +34,7 @@ jobs:
   deploy:
     environment:
       name: github-pages
-      url: ${{ steps: deployment.outputs.page_url }}
+      url: ${{ steps.deployment.outputs.page_url }}
     runs-on: ubuntu-latest
     needs: build
     steps:
