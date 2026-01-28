@@ -8,24 +8,24 @@ import AlertModal from './components/AlertModal';
 import DashboardView from './components/DashboardView';
 import PresencialModal from './components/PresencialModal';
 import UserAuthModal from './components/UserAuthModal'; 
+import LoginScreen from './components/LoginScreen';
 
-import { User, Task, AlertPeriod, normalizeDate, Team, Notification, TaskStatus } from './types';
+import { User, Task, AlertPeriod, Team, Notification, TaskStatus } from './types';
 import { USERS, INITIAL_TASKS, INITIAL_TEAMS } from './constants';
-import { api, setApiUrl, getApiUrl } from './services/api';
-import { Layout, CheckSquare, List, Calendar as CalendarIcon, Settings, PieChart, MapPin, AlertTriangle, Users, Database, Link as LinkIcon, RefreshCw, Loader2, XCircle, X, Filter, KeyRound, Bell } from 'lucide-react';
+import { api, getApiUrl } from './services/api';
+import { Layout, CheckSquare, List, Calendar as CalendarIcon, Settings, PieChart, MapPin, AlertTriangle, Users, Database, Loader2, Filter, KeyRound, Bell, LogOut } from 'lucide-react';
 import { format, isValid } from 'date-fns';
 
 const App: React.FC = () => {
-  // Config State
-  const [isConfigOpen, setIsConfigOpen] = useState(!getApiUrl());
-  const [apiUrlInput, setApiUrlInput] = useState(getApiUrl());
-  const [isSyncing, setIsSyncing] = useState(false);
-  const [connectionStatus, setConnectionStatus] = useState<'DISCONNECTED' | 'CONNECTED' | 'ERROR'>('DISCONNECTED');
-  const [configError, setConfigError] = useState<string | null>(null);
-
+  // Auth State
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [currentUser, setCurrentUser] = useState<User>(USERS[0]); 
   
   // Data State
+  const [isSyncing, setIsSyncing] = useState(false);
+  const [isLoadingInitial, setIsLoadingInitial] = useState(true);
+  const [connectionStatus, setConnectionStatus] = useState<'DISCONNECTED' | 'CONNECTED' | 'ERROR'>('DISCONNECTED');
+  
   const [tasks, setTasks] = useState<Task[]>([]);
   const [teamUsers, setTeamUsers] = useState<User[]>([]);
   const [teams, setTeams] = useState<Team[]>([]);
@@ -34,7 +34,7 @@ const App: React.FC = () => {
   
   const [viewMode, setViewMode] = useState<'CALENDAR' | 'LIST' | 'DASHBOARD'>('CALENDAR');
   const [filterScope, setFilterScope] = useState<string>('MY_TEAM'); 
-  const [filterStatus, setFilterStatus] = useState<TaskStatus | 'ALL'>('ALL'); // For Dashboard filtering
+  const [filterStatus, setFilterStatus] = useState<TaskStatus | 'ALL'>('ALL'); 
   
   // Modals State
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -52,21 +52,16 @@ const App: React.FC = () => {
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
   const [selectedDate, setSelectedDate] = useState<Date | undefined>(undefined);
 
-  // Refs for click outside & stale closures
+  // Refs
   const userSwitcherRef = useRef<HTMLDivElement>(null);
   const notificationRef = useRef<HTMLDivElement>(null);
   const tasksRef = useRef<Task[]>([]);
-  const currentUserRef = useRef<User>(currentUser); // Fix stale closure in interval
+  const currentUserRef = useRef<User>(currentUser);
   const isFirstLoadRef = useRef(true);
 
   // Keep refs synced
-  useEffect(() => {
-    tasksRef.current = tasks;
-  }, [tasks]);
-
-  useEffect(() => {
-    currentUserRef.current = currentUser;
-  }, [currentUser]);
+  useEffect(() => { tasksRef.current = tasks; }, [tasks]);
+  useEffect(() => { currentUserRef.current = currentUser; }, [currentUser]);
 
   // --- CLICK OUTSIDE HANDLER ---
   useEffect(() => {
@@ -82,72 +77,16 @@ const App: React.FC = () => {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  // --- NOTIFICATION LOGIC (LOCAL & SYNC) ---
-  const updateNotifications = (currentTasks: Task[]) => {
-      setNotifications(prev => {
-         const readIds = JSON.parse(localStorage.getItem('GEST_PRO_READ_NOTIFS') || '[]');
-         const currentIds = new Set(prev.map(n => n.id));
-         const incomingNotifications: Notification[] = [];
-         const myId = currentUserRef.current.id;
-
-         // 1. Nudges (Cobranças)
-         currentTasks.forEach(task => {
-             if (task.isNudged) {
-                 const notifId = `${task.id}_nudge`;
-                 if (task.assigneeId === myId && !readIds.includes(notifId) && !currentIds.has(notifId)) {
-                     const title = task.title && task.title.trim() !== '' ? task.title : 'Tarefa sem título';
-                     incomingNotifications.push({
-                        id: notifId,
-                        targetUserId: task.assigneeId,
-                        message: `⚠️ URGENTE: A demanda "${title}" foi cobrada!`,
-                        date: new Date(),
-                        read: false,
-                        type: 'NUDGE'
-                     });
-                     currentIds.add(notifId);
-                 }
-             }
-         });
-
-         // 2. New Assignments
-         if (!isFirstLoadRef.current && tasksRef.current.length > 0) {
-            currentTasks.forEach(newTask => {
-                const oldTask = tasksRef.current.find(t => t.id === newTask.id);
-                // If newly assigned to me
-                if ((!oldTask || oldTask.assigneeId !== newTask.assigneeId) && newTask.assigneeId === myId) {
-                    const notifId = `assign_${newTask.id}_${newTask.assigneeId}`;
-                     if (!currentIds.has(notifId) && !readIds.includes(notifId)) {
-                        const title = newTask.title && newTask.title.trim() !== '' ? newTask.title : 'Tarefa sem título';
-                        incomingNotifications.push({ 
-                            id: notifId, 
-                            targetUserId: newTask.assigneeId,
-                            message: `Nova demanda atribuída: ${title}`, 
-                            date: new Date(), 
-                            read: false, 
-                            type: 'TASK_ASSIGNED' 
-                        });
-                        currentIds.add(notifId);
-                     }
-                }
-            });
-         }
-
-         if (incomingNotifications.length === 0) return prev;
-         return [...incomingNotifications, ...prev];
-      });
-  };
-
-  // Trigger notification check when tasks change locally
-  useEffect(() => {
-     if (tasks.length > 0) {
-        updateNotifications(tasks);
-     }
-  }, [tasks]);
-
   // --- API & SYNC LOGIC ---
-
   const fetchData = async (): Promise<boolean> => {
-    if (!getApiUrl()) return false;
+    if (!getApiUrl()) {
+        // Fallback demo mode if no URL is hardcoded
+        setTasks(INITIAL_TASKS);
+        setTeamUsers(USERS);
+        setTeams(INITIAL_TEAMS);
+        setIsLoadingInitial(false);
+        return false;
+    }
     
     try {
       setIsSyncing(true);
@@ -182,7 +121,7 @@ const App: React.FC = () => {
 
         return { 
           ...t, 
-          title: t.title || 'Sem título', // Ensure title is never undefined
+          title: t.title || 'Sem título', 
           date: dateObj,
           startTime: cleanTime(t.startTime),
           endTime: cleanTime(t.endTime)
@@ -218,100 +157,131 @@ const App: React.FC = () => {
       
       const parsedTeams: Team[] = data.teams || [];
 
-      // Update Notifications based on fetched data
       updateNotifications(parsedTasks);
-
       isFirstLoadRef.current = false;
-
       setTasks(parsedTasks);
       
+      // Update Users List (merging passwords if needed locally, but usually fresh from API)
       if (parsedUsers.length > 0) {
-        setTeamUsers(prevUsers => {
-            return parsedUsers.map(serverUser => {
-                const localUser = prevUsers.find(u => u.id === serverUser.id);
-                if (localUser?.password && !serverUser.password) {
-                    return { ...serverUser, password: localUser.password };
-                }
-                return serverUser;
-            });
-        });
+        setTeamUsers(parsedUsers);
       } else {
-        setTeamUsers(USERS);
+        setTeamUsers(USERS); // Fallback
       }
 
       if (parsedTeams.length > 0) setTeams(parsedTeams);
       else setTeams(INITIAL_TEAMS);
 
       setAlertPeriods(parsedAlerts);
-      
-      // Update current user data safely
-      setTeamUsers(currentList => {
-         const foundCurrent = currentList.find(u => u.id === currentUserRef.current.id);
-         if (foundCurrent) {
-            // Only update if something changed to avoid render loop
-            if (JSON.stringify(foundCurrent) !== JSON.stringify(currentUserRef.current)) {
-                setCurrentUser(prev => ({ ...prev, ...foundCurrent }));
-            }
-         }
-         return currentList; 
-      });
-
       setConnectionStatus('CONNECTED');
+      setIsLoadingInitial(false);
       return true;
     } catch (error) {
       console.error("Sync Error", error);
       setConnectionStatus('ERROR');
+      setIsLoadingInitial(false);
       return false;
     } finally {
       setIsSyncing(false);
     }
   };
 
+  // Initial Fetch on Mount
   useEffect(() => {
-    if (getApiUrl()) {
-      fetchData();
-      const intervalId = setInterval(fetchData, 5000);
-      return () => clearInterval(intervalId);
-    } else {
-      setTasks(INITIAL_TASKS);
-      setTeamUsers(USERS);
-      setTeams(INITIAL_TEAMS);
-      isFirstLoadRef.current = false; 
-    }
+    fetchData();
+    const intervalId = setInterval(fetchData, 5000);
+    return () => clearInterval(intervalId);
   }, []); 
 
-  // Reload notifications when user changes to ensure they see theirs
+  // --- NOTIFICATION LOGIC ---
+  const updateNotifications = (currentTasks: Task[]) => {
+      setNotifications(prev => {
+         const readIds = JSON.parse(localStorage.getItem('GEST_PRO_READ_NOTIFS') || '[]');
+         const currentIds = new Set(prev.map(n => n.id));
+         const incomingNotifications: Notification[] = [];
+         const myId = currentUserRef.current.id;
+
+         currentTasks.forEach(task => {
+             if (task.isNudged) {
+                 const notifId = `${task.id}_nudge`;
+                 if (task.assigneeId === myId && !readIds.includes(notifId) && !currentIds.has(notifId)) {
+                     const title = task.title && task.title.trim() !== '' ? task.title : 'Tarefa sem título';
+                     incomingNotifications.push({
+                        id: notifId,
+                        targetUserId: task.assigneeId,
+                        message: `⚠️ URGENTE: A demanda "${title}" foi cobrada!`,
+                        date: new Date(),
+                        read: false,
+                        type: 'NUDGE'
+                     });
+                     currentIds.add(notifId);
+                 }
+             }
+         });
+
+         if (!isFirstLoadRef.current && tasksRef.current.length > 0) {
+            currentTasks.forEach(newTask => {
+                const oldTask = tasksRef.current.find(t => t.id === newTask.id);
+                if ((!oldTask || oldTask.assigneeId !== newTask.assigneeId) && newTask.assigneeId === myId) {
+                    const notifId = `assign_${newTask.id}_${newTask.assigneeId}`;
+                     if (!currentIds.has(notifId) && !readIds.includes(notifId)) {
+                        const title = newTask.title && newTask.title.trim() !== '' ? newTask.title : 'Tarefa sem título';
+                        incomingNotifications.push({ 
+                            id: notifId, 
+                            targetUserId: newTask.assigneeId,
+                            message: `Nova demanda atribuída: ${title}`, 
+                            date: new Date(), 
+                            read: false, 
+                            type: 'TASK_ASSIGNED' 
+                        });
+                        currentIds.add(notifId);
+                     }
+                }
+            });
+         }
+         if (incomingNotifications.length === 0) return prev;
+         return [...incomingNotifications, ...prev];
+      });
+  };
+
   useEffect(() => {
-    setFilterScope('MY_TEAM');
-  }, [currentUser.id]);
+    if (isAuthenticated) setFilterScope('MY_TEAM');
+  }, [currentUser.id, isAuthenticated]);
 
   const handleMarkAsRead = () => {
      const currentRead = JSON.parse(localStorage.getItem('GEST_PRO_READ_NOTIFS') || '[]');
      const newIds = notifications.filter(n => n.targetUserId === currentUser.id).map(n => n.id);
-     const updatedRead = [...new Set([...currentRead, ...newIds])];
-     
-     localStorage.setItem('GEST_PRO_READ_NOTIFS', JSON.stringify(updatedRead));
+     localStorage.setItem('GEST_PRO_READ_NOTIFS', JSON.stringify([...new Set([...currentRead, ...newIds])]));
      setNotifications(prev => prev.filter(n => n.targetUserId !== currentUser.id));
   };
 
-  const handleConnect = async () => {
-    setConfigError(null);
-    setIsSyncing(true);
-    setApiUrl(apiUrlInput);
-    isFirstLoadRef.current = true; 
-    
-    const success = await fetchData();
-    
-    if (success) {
-      setIsConfigOpen(false);
-    } else {
-      setConfigError("Não foi possível conectar. Verifique se autorizou o script e se a permissão de acesso está definida como 'Qualquer pessoa'.");
-      setConnectionStatus('ERROR');
-    }
-    setIsSyncing(false);
+  // --- LOGIN FLOW HANDLERS ---
+  const handleLoginClick = (user: User) => {
+    setAuthTargetUser(user);
+    setAuthMode('LOGIN');
+    setIsAuthModalOpen(true);
   };
 
-  // --- AUTH HANDLERS ---
+  const handleLoginSuccess = async (updatedUser?: User) => {
+     if (updatedUser) {
+        // First access or password change (user has new password)
+        setTeamUsers(prev => prev.map(u => u.id === updatedUser.id ? updatedUser : u));
+        setCurrentUser(updatedUser);
+        if (getApiUrl()) await api.saveUser(updatedUser);
+     } else if (authTargetUser) {
+        // Standard login (no user change)
+        setCurrentUser(authTargetUser);
+     }
+     setIsAuthenticated(true);
+     setAuthTargetUser(null);
+  };
+
+  const handleLogout = () => {
+    setIsAuthenticated(false);
+    setViewMode('CALENDAR');
+    setIsUserSwitcherOpen(false);
+  };
+
+  // --- AUTH HANDLERS (Inside App) ---
   const handleUserSwitchClick = (user: User) => {
     setAuthTargetUser(user);
     setAuthMode('LOGIN');
@@ -325,88 +295,50 @@ const App: React.FC = () => {
     setIsAuthModalOpen(true);
   };
 
-  const handleAuthSuccess = async (updatedUser?: User) => {
+  const handleAuthModalSuccess = async (updatedUser?: User) => {
     if (updatedUser) {
         setTeamUsers(prev => prev.map(u => u.id === updatedUser.id ? updatedUser : u));
         setCurrentUser(updatedUser);
         if (getApiUrl()) await api.saveUser(updatedUser);
+        if (authMode === 'CHANGE_PASSWORD') alert("Senha alterada com sucesso!");
     } else if (authTargetUser) {
-        setCurrentUser(authTargetUser);
+       // Switching user inside app
+       setCurrentUser(authTargetUser);
+       setIsAuthenticated(true); // Ensure stays true
     }
-    if (authMode === 'CHANGE_PASSWORD') alert("Senha alterada com sucesso!");
   };
+
 
   // --- DATA HANDLERS ---
-  const handleAddTask = (date: Date) => {
-    setSelectedDate(date);
-    setSelectedTask(null);
-    setIsModalOpen(true);
-  };
-
-  const handleEditTask = (task: Task) => {
-    setSelectedTask(task);
-    setSelectedDate(task.date);
-    setIsModalOpen(true);
-  };
-
+  const handleAddTask = (date: Date) => { setSelectedDate(date); setSelectedTask(null); setIsModalOpen(true); };
+  const handleEditTask = (task: Task) => { setSelectedTask(task); setSelectedDate(task.date); setIsModalOpen(true); };
+  
   const handleSaveTask = async (taskToSave: Task) => {
-    // Ensure title is present for local state
     const safeTask = { ...taskToSave, title: taskToSave.title || 'Sem título' };
-    
     setTasks(prev => {
       const exists = prev.find(t => t.id === safeTask.id);
-      if (exists) return prev.map(t => t.id === safeTask.id ? safeTask : t);
-      return [...prev, safeTask];
+      return exists ? prev.map(t => t.id === safeTask.id ? safeTask : t) : [...prev, safeTask];
     });
-
-    if (getApiUrl()) {
-      await api.saveTask(safeTask);
-      fetchData();
-    }
+    if (getApiUrl()) { await api.saveTask(safeTask); fetchData(); }
   };
 
   const handleDeleteTask = async (taskId: string) => {
     setTasks(prev => prev.filter(t => t.id !== taskId));
-    if (getApiUrl()) {
-      await api.deleteTask(taskId);
-      fetchData();
-    }
+    if (getApiUrl()) { await api.deleteTask(taskId); fetchData(); }
   };
 
   const handleAddUser = async (newUser: User) => {
     setTeamUsers(prev => [...prev, newUser]);
-    if (getApiUrl()) {
-      await api.saveUser(newUser);
-      fetchData();
-    }
+    if (getApiUrl()) { await api.saveUser(newUser); fetchData(); }
   };
 
   const handleEditUser = async (updatedUser: User) => {
-    setTeamUsers(prev => prev.map(u => {
-        if (u.id === updatedUser.id) {
-            if (!updatedUser.password && u.password) {
-                return { ...updatedUser, password: u.password };
-            }
-            return updatedUser;
-        }
-        return u;
-    }));
-
-    if (currentUser.id === updatedUser.id) {
-       setCurrentUser(prev => {
-         if (!updatedUser.password && prev.password) {
-           return { ...updatedUser, password: prev.password };
-         }
-         return updatedUser;
-       });
-    }
-
+    setTeamUsers(prev => prev.map(u => u.id === updatedUser.id ? updatedUser : u));
+    if (currentUser.id === updatedUser.id) setCurrentUser(prev => ({...prev, ...updatedUser}));
     if (getApiUrl()) {
-      const userToSend = { ...updatedUser };
       const localUser = teamUsers.find(u => u.id === updatedUser.id);
-      if (localUser?.password && !userToSend.password) {
-          userToSend.password = localUser.password;
-      }
+      const userToSend = { ...updatedUser };
+      if (localUser?.password && !userToSend.password) userToSend.password = localUser.password;
       await api.saveUser(userToSend);
       fetchData();
     }
@@ -414,59 +346,35 @@ const App: React.FC = () => {
   
   const handleRemoveUser = async (userId: string) => {
     setTeamUsers(prev => prev.filter(u => u.id !== userId));
-    if (getApiUrl()) {
-      await api.deleteUser(userId);
-      fetchData();
-    }
+    if (getApiUrl()) { await api.deleteUser(userId); fetchData(); }
   };
   
   const handleAddTeam = async (newTeam: Team) => {
     setTeams(prev => [...prev, newTeam]);
-    if (getApiUrl()) {
-      await api.saveTeam(newTeam);
-      fetchData();
-    }
+    if (getApiUrl()) { await api.saveTeam(newTeam); fetchData(); }
   };
 
   const handleRemoveTeam = async (teamId: string) => {
     setTeams(prev => prev.filter(t => t.id !== teamId));
-    if (getApiUrl()) {
-      await api.deleteTeam(teamId);
-      fetchData();
-    }
+    if (getApiUrl()) { await api.deleteTeam(teamId); fetchData(); }
   };
 
   const handleSaveAlert = async (newAlert: AlertPeriod) => {
     setAlertPeriods(prev => {
        const exists = prev.find(a => a.id === newAlert.id);
-       if (exists) return prev.map(a => a.id === newAlert.id ? newAlert : a);
-       return [...prev, newAlert];
+       return exists ? prev.map(a => a.id === newAlert.id ? newAlert : a) : [...prev, newAlert];
     });
-    
-    if (getApiUrl()) {
-      await api.saveAlert(newAlert);
-      fetchData();
-    }
+    if (getApiUrl()) { await api.saveAlert(newAlert); fetchData(); }
   };
   
   const handleDeleteAlert = async (alertId: string) => {
      setAlertPeriods(prev => prev.filter(a => a.id !== alertId));
-     if (getApiUrl()) {
-        await api.deleteAlert(alertId);
-        fetchData();
-     }
+     if (getApiUrl()) { await api.deleteAlert(alertId); fetchData(); }
   };
 
   const handleBatchUpdatePresence = async (updatedUsers: User[]) => {
-     setTeamUsers(prev => prev.map(u => {
-        const match = updatedUsers.find(upd => upd.id === u.id);
-        return match ? match : u;
-     }));
-     
-     if (getApiUrl()) {
-        await api.saveUsersBatch(updatedUsers);
-        fetchData(); 
-     }
+     setTeamUsers(prev => prev.map(u => updatedUsers.find(upd => upd.id === u.id) || u));
+     if (getApiUrl()) { await api.saveUsersBatch(updatedUsers); fetchData(); }
   };
 
   const isLeader = currentUser.role === 'LEADER' || currentUser.role === 'COORDINATOR';
@@ -475,24 +383,14 @@ const App: React.FC = () => {
   const displayedTasks = tasks.filter(task => {
     const assignee = teamUsers.find(u => u.id === task.assigneeId);
     if (!assignee) return false;
-
     let passesScope = false;
-    if (filterScope === 'ME') {
-      passesScope = assignee.id === currentUser.id;
-    } else if (filterScope === 'MY_TEAM') {
-      passesScope = assignee.teamId === currentUser.teamId;
-    } else if (filterScope === 'ALL_TEAMS') {
-      passesScope = true;
-    } else {
-      passesScope = assignee.teamId === filterScope;
-    }
+    if (filterScope === 'ME') passesScope = assignee.id === currentUser.id;
+    else if (filterScope === 'MY_TEAM') passesScope = assignee.teamId === currentUser.teamId;
+    else if (filterScope === 'ALL_TEAMS') passesScope = true;
+    else passesScope = assignee.teamId === filterScope;
 
     if (!passesScope) return false;
-
-    if (viewMode === 'LIST' && filterStatus !== 'ALL') {
-       if (task.status !== filterStatus) return false;
-    }
-    
+    if (viewMode === 'LIST' && filterStatus !== 'ALL') if (task.status !== filterStatus) return false;
     return true;
   });
   
@@ -502,17 +400,36 @@ const App: React.FC = () => {
   });
 
   const myNotifications = notifications.filter(n => n.targetUserId === currentUser.id);
+  const safeDate = (d: any) => (d instanceof Date && !isNaN(d.getTime())) ? d : (typeof d === 'string' ? new Date(d) : new Date());
 
-  const safeDate = (d: any) => {
-     if (d instanceof Date && !isNaN(d.getTime())) return d;
-     if (typeof d === 'string') return new Date(d);
-     return new Date();
-  };
+  // --- RENDER ---
 
+  // 1. If not authenticated, show Login Screen (after initial data load)
+  if (!isAuthenticated) {
+     return (
+       <>
+         <LoginScreen 
+            users={teamUsers} 
+            teams={teams}
+            onLogin={handleLoginClick} 
+            isLoading={isLoadingInitial}
+         />
+         <UserAuthModal 
+            isOpen={isAuthModalOpen}
+            onClose={() => setIsAuthModalOpen(false)}
+            targetUser={authTargetUser}
+            mode={authMode}
+            onSuccess={handleLoginSuccess}
+         />
+       </>
+     );
+  }
+
+  // 2. Main App
   return (
     <div className="flex h-screen bg-slate-50 text-slate-900 font-sans overflow-hidden">
       
-      {/* Sidebar - Adjusted Layout */}
+      {/* Sidebar */}
       <aside className="w-16 lg:w-72 bg-slate-900 text-slate-300 flex flex-col flex-shrink-0 shadow-xl z-20 transition-all">
         <div className="p-4 lg:p-6 border-b border-slate-800 flex items-center justify-center lg:justify-start gap-3">
           <div className="bg-indigo-600 p-2 rounded-lg text-white shrink-0">
@@ -556,24 +473,19 @@ const App: React.FC = () => {
         </nav>
 
         <div className="p-2 bg-slate-950">
-           <button 
-             onClick={() => { setIsConfigOpen(true); setConfigError(null); }}
-             className="w-full flex items-center justify-center lg:justify-start gap-3 p-3 rounded-lg hover:bg-slate-800 transition-colors group"
-             title={connectionStatus === 'CONNECTED' ? 'Conexão Ativa' : 'Sem Conexão'}
-           >
+           <div className="w-full flex items-center justify-center lg:justify-start gap-3 p-3 rounded-lg hover:bg-slate-800 transition-colors group cursor-default">
               <div className="relative">
                  <Database size={20} className="text-slate-400 group-hover:text-white transition-colors" />
                  <div className={`absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full border-2 border-slate-900 ${
                     connectionStatus === 'CONNECTED' ? 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.6)]' : 
-                    connectionStatus === 'ERROR' ? 'bg-red-500' : 
-                    'bg-slate-600'
+                    connectionStatus === 'ERROR' ? 'bg-red-500' : 'bg-slate-600'
                  }`}></div>
               </div>
               <span className="hidden lg:inline text-sm font-medium text-slate-300 group-hover:text-white">
-                Banco de Dados
+                {connectionStatus === 'CONNECTED' ? 'Conectado' : 'Desconectado'}
               </span>
               {isSyncing && <Loader2 size={14} className="animate-spin ml-auto text-slate-500" />}
-           </button>
+           </div>
         </div>
 
         <div className="relative border-t border-slate-800 bg-slate-950 p-2" ref={userSwitcherRef}>
@@ -602,12 +514,17 @@ const App: React.FC = () => {
                      {!u.password && <span className="ml-auto w-2 h-2 rounded-full bg-red-500" title="Sem senha"></span>}
                    </button>
                  ))}
+                 <div className="border-t border-slate-700 mt-1 pt-1">
+                    <button onClick={handleLogout} className="w-full flex items-center gap-2 p-2 text-red-400 hover:bg-slate-700 rounded text-sm">
+                        <LogOut size={14} /> Sair do Sistema
+                    </button>
+                 </div>
               </div>
            )}
         </div>
       </aside>
 
-      {/* Main Content */}
+      {/* Main Content Area */}
       <main className="flex-1 flex flex-col h-screen overflow-hidden relative">
         <header className="h-16 bg-white border-b border-slate-200 flex items-center justify-between px-6 shadow-sm z-10 gap-4">
           
@@ -660,7 +577,6 @@ const App: React.FC = () => {
           </div>
           
           <div className="flex items-center gap-6">
-            {/* Notifications */}
             <div className="relative" ref={notificationRef}>
               <button 
                 onClick={() => setIsNotificationsOpen(!isNotificationsOpen)}
@@ -695,10 +611,7 @@ const App: React.FC = () => {
                     </div>
                     {myNotifications.length > 0 && (
                         <div className="bg-slate-50 p-2 text-center border-t border-slate-100">
-                            <button 
-                                onClick={handleMarkAsRead} 
-                                className="text-xs text-indigo-600 font-medium hover:underline"
-                            >
+                            <button onClick={handleMarkAsRead} className="text-xs text-indigo-600 font-medium hover:underline">
                                 Marcar como lidas
                             </button>
                         </div>
@@ -707,12 +620,7 @@ const App: React.FC = () => {
               )}
             </div>
 
-            {/* Change Password Button */}
-            <button 
-               onClick={handleChangePasswordClick}
-               className="text-slate-400 hover:text-indigo-600 transition-colors"
-               title="Alterar Senha"
-            >
+            <button onClick={handleChangePasswordClick} className="text-slate-400 hover:text-indigo-600 transition-colors" title="Alterar Senha">
                <KeyRound size={18} />
             </button>
 
@@ -728,7 +636,6 @@ const App: React.FC = () => {
           </div>
         </header>
 
-        {/* Content */}
         <div className="flex-1 p-4 lg:p-6 overflow-hidden flex flex-col bg-slate-50">
           <div className="flex-1 h-full min-h-0">
             {viewMode === 'CALENDAR' ? (
@@ -760,83 +667,13 @@ const App: React.FC = () => {
         </div>
       </main>
 
-      {/* Config Modal */}
-      {isConfigOpen && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
-           <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg overflow-hidden p-6 text-center animate-in fade-in zoom-in duration-200 relative">
-              <button 
-                onClick={() => setIsConfigOpen(false)}
-                className="absolute top-4 right-4 text-slate-400 hover:text-slate-600 transition-colors"
-              >
-                 <X size={24} />
-              </button>
-
-              <div className="w-16 h-16 bg-indigo-100 text-indigo-600 rounded-full flex items-center justify-center mx-auto mb-4">
-                 <Database size={32} />
-              </div>
-              <h2 className="text-xl font-bold text-slate-900 mb-2">Conectar Google Sheets</h2>
-              <p className="text-slate-500 text-sm mb-6">
-                 Para sincronizar dados entre a equipe, insira a URL do Web App do Google Apps Script abaixo.
-              </p>
-              
-              {configError && (
-                 <div className="mb-4 bg-red-50 border border-red-200 rounded-lg p-3 text-sm text-red-700 flex items-start gap-2 text-left">
-                    <XCircle size={16} className="mt-0.5 flex-shrink-0" />
-                    <div>{configError}</div>
-                 </div>
-              )}
-
-              <div className="text-left mb-4">
-                 <label className="block text-xs font-bold text-slate-700 uppercase mb-1">URL da API (Script Google)</label>
-                 <div className="flex gap-2">
-                   <div className="relative flex-1">
-                      <LinkIcon className="absolute left-3 top-2.5 text-slate-400" size={16} />
-                      <input 
-                        type="text" 
-                        value={apiUrlInput}
-                        onChange={(e) => setApiUrlInput(e.target.value)}
-                        placeholder="https://script.google.com/macros/s/..."
-                        className="w-full pl-9 pr-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500"
-                      />
-                   </div>
-                 </div>
-              </div>
-
-              <div className="flex gap-3">
-                 <button 
-                   onClick={() => setIsConfigOpen(false)}
-                   className="flex-1 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100 rounded-lg"
-                 >
-                   Usar Offline (Demo)
-                 </button>
-                 <button 
-                   onClick={handleConnect}
-                   disabled={!apiUrlInput || isSyncing}
-                   className="flex-1 py-2 text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg shadow-lg shadow-indigo-200 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
-                 >
-                   {isSyncing ? <Loader2 size={16} className="animate-spin" /> : 'Conectar e Sincronizar'}
-                 </button>
-              </div>
-              
-              <div className="mt-6 pt-6 border-t border-slate-100 text-xs text-slate-400 text-left">
-                 <p className="mb-2 font-bold">Instruções:</p>
-                 <ol className="list-decimal pl-4 space-y-1">
-                    <li>Copie o novo código do Apps Script (versão com senha).</li>
-                    <li>Vá em <strong>Implantar</strong> {'>'} <strong>Nova implantação</strong>.</li>
-                    <li>Cole a URL gerada acima.</li>
-                 </ol>
-              </div>
-           </div>
-        </div>
-      )}
-
-      {/* Auth Modal (Password) */}
+      {/* Auth Modal (Password Change / Login inside app) */}
       <UserAuthModal 
         isOpen={isAuthModalOpen}
         onClose={() => setIsAuthModalOpen(false)}
         targetUser={authTargetUser}
         mode={authMode}
-        onSuccess={handleAuthSuccess}
+        onSuccess={handleAuthModalSuccess}
       />
 
       {/* Other Modals */}
