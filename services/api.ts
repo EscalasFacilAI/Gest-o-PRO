@@ -1,4 +1,6 @@
+
 import { Task, User, AlertPeriod, Team } from '../types';
+import { format } from 'date-fns';
 
 // This will be set by the user in the UI
 let API_URL = localStorage.getItem('GESTOR_PRO_API_URL') || '';
@@ -59,7 +61,7 @@ export const api = {
   saveTask: async (task: Task) => {
     return sendRequest('saveTask', {
       ...task,
-      date: task.date.toISOString(),
+      date: format(task.date, 'yyyy-MM-dd'), // Send only date part string
     });
   },
 
@@ -69,6 +71,11 @@ export const api = {
 
   saveUser: async (user: User) => {
     return sendRequest('saveUser', user);
+  },
+  
+  saveUsersBatch: async (users: User[]) => {
+    // Optimized batch update: sends all users in one request
+    return sendRequest('saveUsersBatch', users);
   },
 
   deleteUser: async (userId: string) => {
@@ -86,8 +93,12 @@ export const api = {
   saveAlert: async (alert: AlertPeriod) => {
     return sendRequest('saveAlert', {
       ...alert,
-      startDate: alert.startDate.toISOString(),
-      endDate: alert.endDate.toISOString(),
+      startDate: format(alert.startDate, 'yyyy-MM-dd'),
+      endDate: format(alert.endDate, 'yyyy-MM-dd'),
     });
+  },
+
+  deleteAlert: async (alertId: string) => {
+    return sendRequest('deleteAlert', { id: alertId });
   }
 };

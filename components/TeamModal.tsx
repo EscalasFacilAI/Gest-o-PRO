@@ -1,5 +1,6 @@
+
 import React, { useState } from 'react';
-import { X, UserPlus, Trash2, Shield, Users, Briefcase, Pencil, UserCheck } from 'lucide-react';
+import { X, UserPlus, Trash2, Shield, Users, Briefcase, Pencil, UserCheck, Info } from 'lucide-react';
 import { User, Role, Team } from '../types';
 
 interface TeamModalProps {
@@ -167,20 +168,6 @@ const TeamModal: React.FC<TeamModalProps> = ({
                    />
                    
                    <div>
-                      <label className="block text-xs font-bold text-slate-500 mb-1">Setor</label>
-                      <select 
-                        value={teamId}
-                        onChange={e => setTeamId(e.target.value)}
-                        className="w-full px-2 py-2 border border-slate-300 rounded text-sm bg-white"
-                      >
-                         <option value="" disabled>Selecione...</option>
-                         {teams.map(t => (
-                           <option key={t.id} value={t.id}>{t.name}</option>
-                         ))}
-                      </select>
-                   </div>
-                   
-                   <div>
                       <label className="block text-xs font-bold text-slate-500 mb-1">Cargo</label>
                       <select 
                         value={role}
@@ -192,7 +179,32 @@ const TeamModal: React.FC<TeamModalProps> = ({
                          <option value="COORDINATOR">Coordenador</option>
                       </select>
                    </div>
+
+                   <div>
+                      <label className="block text-xs font-bold text-slate-500 mb-1">
+                        {role === 'COORDINATOR' ? 'Lotação / Equipe Principal' : 'Setor'}
+                      </label>
+                      <select 
+                        value={teamId}
+                        onChange={e => setTeamId(e.target.value)}
+                        className="w-full px-2 py-2 border border-slate-300 rounded text-sm bg-white"
+                      >
+                         <option value="" disabled>Selecione...</option>
+                         {teams.map(t => (
+                           <option key={t.id} value={t.id}>{t.name}</option>
+                         ))}
+                      </select>
+                   </div>
                  </div>
+
+                 {role === 'COORDINATOR' && (
+                    <div className="bg-indigo-100 text-indigo-800 p-2 rounded text-xs flex items-start gap-2 border border-indigo-200">
+                       <Info size={14} className="mt-0.5 shrink-0" />
+                       <div>
+                         <strong>Acesso Global:</strong> Coordenadores visualizam automaticamente demandas de <u>todas as equipes</u>, independente da lotação selecionada acima.
+                       </div>
+                    </div>
+                 )}
 
                  <div className="flex gap-2">
                    {editingUserId && (

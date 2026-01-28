@@ -1,3 +1,4 @@
+
 export type Role = 'COORDINATOR' | 'LEADER' | 'MEMBER';
 
 export type TaskStatus = 'TODO' | 'IN_PROGRESS' | 'DONE';
@@ -20,7 +21,7 @@ export interface User {
   teamId: string;
   avatar: string;
   presencialDates: string[]; // Array of ISO date strings (yyyy-MM-dd)
-  password?: string; // Optional because dummy users or legacy data might not have it yet
+  password?: string; 
 }
 
 export interface Task {
@@ -28,11 +29,13 @@ export interface Task {
   title: string;
   description: string;
   assigneeId: string;
+  targetTeamId?: string; // Optional: If specific to a team context
   date: Date; // Normalized to midnight
   startTime?: string; // Format "HH:mm"
   endTime?: string;   // Format "HH:mm"
   status: TaskStatus;
   priority: Priority;
+  isNudged?: boolean; // If true, it was "Cobrada"
 }
 
 export interface AlertPeriod {
@@ -41,6 +44,16 @@ export interface AlertPeriod {
   endDate: Date;
   label: string;
   color: AlertColor;
+  targetTeamId?: string | 'ALL'; // Filter alert by team
+}
+
+export interface Notification {
+  id: string;
+  targetUserId: string; // Who should see this
+  message: string;
+  date: Date;
+  read: boolean;
+  type: 'TASK_ASSIGNED' | 'NUDGE';
 }
 
 // Helper to keep dates consistent

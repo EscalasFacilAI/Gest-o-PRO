@@ -1,3 +1,4 @@
+
 import React from 'react';
 import { Task, User, normalizeDate } from '../types';
 import { STATUS_LABELS, STATUS_COLORS, USERS } from '../constants';
@@ -51,11 +52,17 @@ const TaskListView: React.FC<TaskListViewProps> = ({ tasks, currentUser, onEditT
                 `}></div>
                 
                 <h3 className={`text-sm font-bold uppercase tracking-wide mb-4 ${isToday ? 'text-indigo-600' : 'text-slate-500'}`}>
-                  {format(date, "EEEE, d 'de' MMMM", { locale: ptBR })} {isToday && '(Hoje)'}
+                  {format(date, "dd/MM/yy ' - ' EEEE", { locale: ptBR })} {isToday && '(Hoje)'}
                 </h3>
 
                 <div className="space-y-3">
                   {dayTasks.map(task => {
+                    // Try to find assignee in USERS first, then fallback to current approach if user management changed
+                    // Since USERS is a constant fallback, we should actually rely on data passed in App.tsx or similar
+                    // But TaskListView doesn't receive 'users' prop in this snippet, it imports USERS.
+                    // Ideally it should receive users prop, but for this quick fix we use what's there.
+                    // However, we can improve it by checking the assigneeId against passed currentUser or generic logic.
+                    // We'll keep existing logic but just fix date format above.
                     const assignee = USERS.find(u => u.id === task.assigneeId);
                     
                     return (

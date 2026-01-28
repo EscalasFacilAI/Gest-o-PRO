@@ -1,3 +1,4 @@
+
 import React, { useState } from 'react';
 import { 
   startOfMonth, endOfMonth, startOfWeek, endOfWeek, 
@@ -156,7 +157,7 @@ const Calendar: React.FC<CalendarProps> = ({ tasks, users, alertPeriods, current
                         `}
                       >
                         <div className="flex justify-between items-center mb-0.5 opacity-75">
-                           <span>{task.startTime || '??:??'}</span>
+                           <span>{task.startTime || '??:??'} - {task.endTime || '??:??'}</span>
                         </div>
                         <div className="font-semibold truncate leading-tight mb-0.5">{task.title}</div>
                         <div className="flex items-center justify-between opacity-80">

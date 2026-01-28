@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useRef } from 'react';
 import Calendar from './components/Calendar';
 import TaskModal from './components/TaskModal';
@@ -6,12 +7,13 @@ import TeamModal from './components/TeamModal';
 import AlertModal from './components/AlertModal';
 import DashboardView from './components/DashboardView';
 import PresencialModal from './components/PresencialModal';
-import UserAuthModal from './components/UserAuthModal'; // Import Auth Modal
+import UserAuthModal from './components/UserAuthModal'; 
 
-import { User, Task, AlertPeriod, normalizeDate, Team } from './types';
+import { User, Task, AlertPeriod, normalizeDate, Team, Notification, TaskStatus } from './types';
 import { USERS, INITIAL_TASKS, INITIAL_TEAMS } from './constants';
 import { api, setApiUrl, getApiUrl } from './services/api';
-import { Layout, CheckSquare, List, Calendar as CalendarIcon, Settings, PieChart, MapPin, AlertTriangle, Users, User as UserIcon, Database, Link as LinkIcon, RefreshCw, Loader2, XCircle, X, Filter, KeyRound } from 'lucide-react';
+import { Layout, CheckSquare, List, Calendar as CalendarIcon, Settings, PieChart, MapPin, AlertTriangle, Users, Database, Link as LinkIcon, RefreshCw, Loader2, XCircle, X, Filter, KeyRound, Bell } from 'lucide-react';
+import { format, isValid } from 'date-fns';
 
 const App: React.FC = () => {
   // Config State
@@ -28,9 +30,11 @@ const App: React.FC = () => {
   const [teamUsers, setTeamUsers] = useState<User[]>([]);
   const [teams, setTeams] = useState<Team[]>([]);
   const [alertPeriods, setAlertPeriods] = useState<AlertPeriod[]>([]);
+  const [notifications, setNotifications] = useState<Notification[]>([]);
   
   const [viewMode, setViewMode] = useState<'CALENDAR' | 'LIST' | 'DASHBOARD'>('CALENDAR');
   const [filterScope, setFilterScope] = useState<string>('MY_TEAM'); 
+  const [filterStatus, setFilterStatus] = useState<TaskStatus | 'ALL'>('ALL'); // For Dashboard filtering
   
   // Modals State
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -38,6 +42,7 @@ const App: React.FC = () => {
   const [isAlertModalOpen, setIsAlertModalOpen] = useState(false);
   const [isPresencialModalOpen, setIsPresencialModalOpen] = useState(false);
   const [isUserSwitcherOpen, setIsUserSwitcherOpen] = useState(false);
+  const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
 
   // Auth Modal State
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
@@ -46,6 +51,98 @@ const App: React.FC = () => {
 
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
   const [selectedDate, setSelectedDate] = useState<Date | undefined>(undefined);
+
+  // Refs for click outside & stale closures
+  const userSwitcherRef = useRef<HTMLDivElement>(null);
+  const notificationRef = useRef<HTMLDivElement>(null);
+  const tasksRef = useRef<Task[]>([]);
+  const currentUserRef = useRef<User>(currentUser); // Fix stale closure in interval
+  const isFirstLoadRef = useRef(true);
+
+  // Keep refs synced
+  useEffect(() => {
+    tasksRef.current = tasks;
+  }, [tasks]);
+
+  useEffect(() => {
+    currentUserRef.current = currentUser;
+  }, [currentUser]);
+
+  // --- CLICK OUTSIDE HANDLER ---
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (userSwitcherRef.current && !userSwitcherRef.current.contains(event.target as Node)) {
+        setIsUserSwitcherOpen(false);
+      }
+      if (notificationRef.current && !notificationRef.current.contains(event.target as Node)) {
+        setIsNotificationsOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  // --- NOTIFICATION LOGIC (LOCAL & SYNC) ---
+  const updateNotifications = (currentTasks: Task[]) => {
+      setNotifications(prev => {
+         const readIds = JSON.parse(localStorage.getItem('GEST_PRO_READ_NOTIFS') || '[]');
+         const currentIds = new Set(prev.map(n => n.id));
+         const incomingNotifications: Notification[] = [];
+         const myId = currentUserRef.current.id;
+
+         // 1. Nudges (Cobranças)
+         currentTasks.forEach(task => {
+             if (task.isNudged) {
+                 const notifId = `${task.id}_nudge`;
+                 if (task.assigneeId === myId && !readIds.includes(notifId) && !currentIds.has(notifId)) {
+                     const title = task.title && task.title.trim() !== '' ? task.title : 'Tarefa sem título';
+                     incomingNotifications.push({
+                        id: notifId,
+                        targetUserId: task.assigneeId,
+                        message: `⚠️ URGENTE: A demanda "${title}" foi cobrada!`,
+                        date: new Date(),
+                        read: false,
+                        type: 'NUDGE'
+                     });
+                     currentIds.add(notifId);
+                 }
+             }
+         });
+
+         // 2. New Assignments
+         if (!isFirstLoadRef.current && tasksRef.current.length > 0) {
+            currentTasks.forEach(newTask => {
+                const oldTask = tasksRef.current.find(t => t.id === newTask.id);
+                // If newly assigned to me
+                if ((!oldTask || oldTask.assigneeId !== newTask.assigneeId) && newTask.assigneeId === myId) {
+                    const notifId = `assign_${newTask.id}_${newTask.assigneeId}`;
+                     if (!currentIds.has(notifId) && !readIds.includes(notifId)) {
+                        const title = newTask.title && newTask.title.trim() !== '' ? newTask.title : 'Tarefa sem título';
+                        incomingNotifications.push({ 
+                            id: notifId, 
+                            targetUserId: newTask.assigneeId,
+                            message: `Nova demanda atribuída: ${title}`, 
+                            date: new Date(), 
+                            read: false, 
+                            type: 'TASK_ASSIGNED' 
+                        });
+                        currentIds.add(notifId);
+                     }
+                }
+            });
+         }
+
+         if (incomingNotifications.length === 0) return prev;
+         return [...incomingNotifications, ...prev];
+      });
+  };
+
+  // Trigger notification check when tasks change locally
+  useEffect(() => {
+     if (tasks.length > 0) {
+        updateNotifications(tasks);
+     }
+  }, [tasks]);
 
   // --- API & SYNC LOGIC ---
 
@@ -56,34 +153,82 @@ const App: React.FC = () => {
       setIsSyncing(true);
       const data = await api.sync();
       
-      const parsedTasks: Task[] = data.tasks.map((t: any) => ({
-        ...t,
-        date: new Date(t.date),
-      }));
+      // PARSE TASKS
+      const parsedTasks: Task[] = data.tasks.map((t: any) => {
+        let dateObj;
+        if (typeof t.date === 'string' && t.date.includes('-') && !t.date.includes('T')) {
+           const [y, m, d] = t.date.split('-').map(Number);
+           dateObj = new Date(y, m - 1, d);
+        } else if (typeof t.date === 'string') {
+           const datePart = t.date.substring(0, 10);
+           if (datePart.match(/^\d{4}-\d{2}-\d{2}$/)) {
+             const [y, m, d] = datePart.split('-').map(Number);
+             dateObj = new Date(y, m - 1, d);
+           } else {
+             dateObj = new Date(t.date);
+           }
+        } else {
+           dateObj = new Date(t.date);
+        }
 
-      const parsedAlerts: AlertPeriod[] = data.alerts.map((a: any) => ({
-        ...a,
-        startDate: new Date(a.startDate),
-        endDate: new Date(a.endDate),
-      }));
+        const cleanTime = (val: any) => {
+          if (!val) return '';
+          const strVal = String(val);
+          if (strVal.match(/^\d{1,2}:\d{2}$/)) return strVal;
+          const d = new Date(strVal);
+          if (isValid(d)) return format(d, 'HH:mm');
+          return strVal;
+        };
+
+        return { 
+          ...t, 
+          title: t.title || 'Sem título', // Ensure title is never undefined
+          date: dateObj,
+          startTime: cleanTime(t.startTime),
+          endTime: cleanTime(t.endTime)
+        };
+      });
+
+      const parsedAlerts: AlertPeriod[] = data.alerts.map((a: any) => {
+         let start, end;
+         if (typeof a.startDate === 'string') {
+            const datePart = a.startDate.substring(0, 10);
+            if (datePart.match(/^\d{4}-\d{2}-\d{2}$/)) {
+               const [y, m, d] = datePart.split('-').map(Number);
+               start = new Date(y, m - 1, d);
+            } else start = new Date(a.startDate);
+         } else start = new Date(a.startDate);
+
+         if (typeof a.endDate === 'string') {
+             const datePart = a.endDate.substring(0, 10);
+             if (datePart.match(/^\d{4}-\d{2}-\d{2}$/)) {
+                const [y, m, d] = datePart.split('-').map(Number);
+                end = new Date(y, m - 1, d);
+             } else end = new Date(a.endDate);
+         } else end = new Date(a.endDate);
+
+         return { ...a, startDate: start, endDate: end };
+      });
 
       const parsedUsers: User[] = data.users.map((u: any) => ({
         ...u,
         presencialDates: Array.isArray(u.presencialDates) ? u.presencialDates : [],
-        // FIX: Ensure password is treated as a string even if Google Sheets sends a number
         password: (u.password !== undefined && u.password !== null && u.password !== '') ? String(u.password) : undefined
       }));
       
       const parsedTeams: Team[] = data.teams || [];
 
+      // Update Notifications based on fetched data
+      updateNotifications(parsedTasks);
+
+      isFirstLoadRef.current = false;
+
       setTasks(parsedTasks);
       
-      // SMART MERGE USERS: Prevent overwriting local password with empty server password (due to latency)
       if (parsedUsers.length > 0) {
         setTeamUsers(prevUsers => {
             return parsedUsers.map(serverUser => {
                 const localUser = prevUsers.find(u => u.id === serverUser.id);
-                // If local has password but server doesn't yet (latency issue), KEEP LOCAL
                 if (localUser?.password && !serverUser.password) {
                     return { ...serverUser, password: localUser.password };
                 }
@@ -99,17 +244,14 @@ const App: React.FC = () => {
 
       setAlertPeriods(parsedAlerts);
       
-      // Update current user reference but preserve local password if server lags
+      // Update current user data safely
       setTeamUsers(currentList => {
-         const foundCurrent = currentList.find(u => u.id === currentUser.id);
+         const foundCurrent = currentList.find(u => u.id === currentUserRef.current.id);
          if (foundCurrent) {
-            // Check if vital data changed, but ignore transient UI states
-            // We use this mostly to keep roles and names in sync
-            if (foundCurrent.name !== currentUser.name || foundCurrent.role !== currentUser.role || foundCurrent.teamId !== currentUser.teamId) {
-               setCurrentUser(prev => ({ ...prev, ...foundCurrent }));
+            // Only update if something changed to avoid render loop
+            if (JSON.stringify(foundCurrent) !== JSON.stringify(currentUserRef.current)) {
+                setCurrentUser(prev => ({ ...prev, ...foundCurrent }));
             }
-         } else if (currentList.length > 0 && !currentList.find(u => u.id === currentUser.id)) {
-            setCurrentUser(currentList[0]);
          }
          return currentList; 
       });
@@ -134,17 +276,29 @@ const App: React.FC = () => {
       setTasks(INITIAL_TASKS);
       setTeamUsers(USERS);
       setTeams(INITIAL_TEAMS);
+      isFirstLoadRef.current = false; 
     }
   }, []); 
 
+  // Reload notifications when user changes to ensure they see theirs
   useEffect(() => {
     setFilterScope('MY_TEAM');
   }, [currentUser.id]);
+
+  const handleMarkAsRead = () => {
+     const currentRead = JSON.parse(localStorage.getItem('GEST_PRO_READ_NOTIFS') || '[]');
+     const newIds = notifications.filter(n => n.targetUserId === currentUser.id).map(n => n.id);
+     const updatedRead = [...new Set([...currentRead, ...newIds])];
+     
+     localStorage.setItem('GEST_PRO_READ_NOTIFS', JSON.stringify(updatedRead));
+     setNotifications(prev => prev.filter(n => n.targetUserId !== currentUser.id));
+  };
 
   const handleConnect = async () => {
     setConfigError(null);
     setIsSyncing(true);
     setApiUrl(apiUrlInput);
+    isFirstLoadRef.current = true; 
     
     const success = await fetchData();
     
@@ -158,12 +312,11 @@ const App: React.FC = () => {
   };
 
   // --- AUTH HANDLERS ---
-
   const handleUserSwitchClick = (user: User) => {
     setAuthTargetUser(user);
     setAuthMode('LOGIN');
     setIsAuthModalOpen(true);
-    setIsUserSwitcherOpen(false); // Close dropdown
+    setIsUserSwitcherOpen(false); 
   };
 
   const handleChangePasswordClick = () => {
@@ -173,34 +326,17 @@ const App: React.FC = () => {
   };
 
   const handleAuthSuccess = async (updatedUser?: User) => {
-    // 1. Update Local State IMMEDIATELY
     if (updatedUser) {
         setTeamUsers(prev => prev.map(u => u.id === updatedUser.id ? updatedUser : u));
-        
-        if (currentUser.id === updatedUser.id) {
-            setCurrentUser(updatedUser);
-        } else {
-            // If switching user, log them in
-            setCurrentUser(updatedUser);
-        }
-
-        // 2. Send to Server asynchronously
-        if (getApiUrl()) {
-            await api.saveUser(updatedUser);
-            // Do NOT call fetchData immediately to avoid race condition with latency
-        }
+        setCurrentUser(updatedUser);
+        if (getApiUrl()) await api.saveUser(updatedUser);
     } else if (authTargetUser) {
-        // Just a login with no data change
         setCurrentUser(authTargetUser);
     }
-    
-    if (authMode === 'CHANGE_PASSWORD') {
-        alert("Senha alterada com sucesso!");
-    }
+    if (authMode === 'CHANGE_PASSWORD') alert("Senha alterada com sucesso!");
   };
 
   // --- DATA HANDLERS ---
-
   const handleAddTask = (date: Date) => {
     setSelectedDate(date);
     setSelectedTask(null);
@@ -214,14 +350,17 @@ const App: React.FC = () => {
   };
 
   const handleSaveTask = async (taskToSave: Task) => {
+    // Ensure title is present for local state
+    const safeTask = { ...taskToSave, title: taskToSave.title || 'Sem título' };
+    
     setTasks(prev => {
-      const exists = prev.find(t => t.id === taskToSave.id);
-      if (exists) return prev.map(t => t.id === taskToSave.id ? taskToSave : t);
-      return [...prev, taskToSave];
+      const exists = prev.find(t => t.id === safeTask.id);
+      if (exists) return prev.map(t => t.id === safeTask.id ? safeTask : t);
+      return [...prev, safeTask];
     });
 
     if (getApiUrl()) {
-      await api.saveTask(taskToSave);
+      await api.saveTask(safeTask);
       fetchData();
     }
   };
@@ -243,11 +382,8 @@ const App: React.FC = () => {
   };
 
   const handleEditUser = async (updatedUser: User) => {
-    // Preserve password if not being edited explicitly here
-    // But we need to ensure we don't lose the password if the modal sends a user object without it
     setTeamUsers(prev => prev.map(u => {
         if (u.id === updatedUser.id) {
-            // If the incoming update doesn't have a password but the local one does, keep the local one
             if (!updatedUser.password && u.password) {
                 return { ...updatedUser, password: u.password };
             }
@@ -257,7 +393,6 @@ const App: React.FC = () => {
     }));
 
     if (currentUser.id === updatedUser.id) {
-       // Similar logic for current user
        setCurrentUser(prev => {
          if (!updatedUser.password && prev.password) {
            return { ...updatedUser, password: prev.password };
@@ -267,7 +402,6 @@ const App: React.FC = () => {
     }
 
     if (getApiUrl()) {
-      // Ensure we send the password to the server if we have it locally
       const userToSend = { ...updatedUser };
       const localUser = teamUsers.find(u => u.id === updatedUser.id);
       if (localUser?.password && !userToSend.password) {
@@ -303,27 +437,36 @@ const App: React.FC = () => {
   };
 
   const handleSaveAlert = async (newAlert: AlertPeriod) => {
-    setAlertPeriods(prev => [...prev, newAlert]);
+    setAlertPeriods(prev => {
+       const exists = prev.find(a => a.id === newAlert.id);
+       if (exists) return prev.map(a => a.id === newAlert.id ? newAlert : a);
+       return [...prev, newAlert];
+    });
+    
     if (getApiUrl()) {
       await api.saveAlert(newAlert);
       fetchData();
     }
   };
+  
+  const handleDeleteAlert = async (alertId: string) => {
+     setAlertPeriods(prev => prev.filter(a => a.id !== alertId));
+     if (getApiUrl()) {
+        await api.deleteAlert(alertId);
+        fetchData();
+     }
+  };
 
-  const handleTogglePresence = async (userId: string, dateStr: string) => {
-     let updatedUser: User | undefined;
-     setTeamUsers(prev => prev.map(user => {
-       if (user.id === userId) {
-         const isPresent = user.presencialDates.includes(dateStr);
-         const newDates = isPresent 
-           ? user.presencialDates.filter(d => d !== dateStr) 
-           : [...user.presencialDates, dateStr];
-         updatedUser = { ...user, presencialDates: newDates };
-         return updatedUser;
-       }
-       return user;
+  const handleBatchUpdatePresence = async (updatedUsers: User[]) => {
+     setTeamUsers(prev => prev.map(u => {
+        const match = updatedUsers.find(upd => upd.id === u.id);
+        return match ? match : u;
      }));
-     if (updatedUser && getApiUrl()) await api.saveUser(updatedUser);
+     
+     if (getApiUrl()) {
+        await api.saveUsersBatch(updatedUsers);
+        fetchData(); 
+     }
   };
 
   const isLeader = currentUser.role === 'LEADER' || currentUser.role === 'COORDINATOR';
@@ -333,27 +476,44 @@ const App: React.FC = () => {
     const assignee = teamUsers.find(u => u.id === task.assigneeId);
     if (!assignee) return false;
 
+    let passesScope = false;
     if (filterScope === 'ME') {
-      return assignee.id === currentUser.id;
+      passesScope = assignee.id === currentUser.id;
+    } else if (filterScope === 'MY_TEAM') {
+      passesScope = assignee.teamId === currentUser.teamId;
+    } else if (filterScope === 'ALL_TEAMS') {
+      passesScope = true;
+    } else {
+      passesScope = assignee.teamId === filterScope;
+    }
+
+    if (!passesScope) return false;
+
+    if (viewMode === 'LIST' && filterStatus !== 'ALL') {
+       if (task.status !== filterStatus) return false;
     }
     
-    if (filterScope === 'MY_TEAM') {
-      return assignee.teamId === currentUser.teamId;
-    }
-    
-    if (filterScope === 'ALL_TEAMS') {
-      return true;
-    }
-    
-    return assignee.teamId === filterScope;
+    return true;
   });
+  
+  const displayedAlerts = alertPeriods.filter(alert => {
+     if (!alert.targetTeamId || alert.targetTeamId === 'ALL') return true;
+     return alert.targetTeamId === currentUser.teamId || isCoordinator;
+  });
+
+  const myNotifications = notifications.filter(n => n.targetUserId === currentUser.id);
+
+  const safeDate = (d: any) => {
+     if (d instanceof Date && !isNaN(d.getTime())) return d;
+     if (typeof d === 'string') return new Date(d);
+     return new Date();
+  };
 
   return (
     <div className="flex h-screen bg-slate-50 text-slate-900 font-sans overflow-hidden">
       
       {/* Sidebar - Adjusted Layout */}
       <aside className="w-16 lg:w-72 bg-slate-900 text-slate-300 flex flex-col flex-shrink-0 shadow-xl z-20 transition-all">
-        {/* Updated Title and Slogan - Stacked but minimal */}
         <div className="p-4 lg:p-6 border-b border-slate-800 flex items-center justify-center lg:justify-start gap-3">
           <div className="bg-indigo-600 p-2 rounded-lg text-white shrink-0">
              <Layout size={24} />
@@ -370,7 +530,7 @@ const App: React.FC = () => {
             <span className="hidden lg:inline">Minhas Demandas</span>
           </button>
 
-          <button onClick={() => setViewMode('DASHBOARD')} className={`w-full px-3 py-3 rounded-lg flex items-center justify-center lg:justify-start gap-3 font-medium transition-colors ${viewMode === 'DASHBOARD' ? 'bg-slate-800 text-white' : 'hover:bg-slate-800 text-slate-400'}`}>
+          <button onClick={() => { setViewMode('DASHBOARD'); setFilterStatus('ALL'); }} className={`w-full px-3 py-3 rounded-lg flex items-center justify-center lg:justify-start gap-3 font-medium transition-colors ${viewMode === 'DASHBOARD' ? 'bg-slate-800 text-white' : 'hover:bg-slate-800 text-slate-400'}`}>
             <PieChart size={20} />
             <span className="hidden lg:inline">Indicadores</span>
           </button>
@@ -395,7 +555,6 @@ const App: React.FC = () => {
           )}
         </nav>
 
-        {/* Database Config */}
         <div className="p-2 bg-slate-950">
            <button 
              onClick={() => { setIsConfigOpen(true); setConfigError(null); }}
@@ -417,8 +576,7 @@ const App: React.FC = () => {
            </button>
         </div>
 
-        {/* User Switcher with Password Protection */}
-        <div className="relative border-t border-slate-800 bg-slate-950 p-2">
+        <div className="relative border-t border-slate-800 bg-slate-950 p-2" ref={userSwitcherRef}>
            <button 
              onClick={() => setIsUserSwitcherOpen(!isUserSwitcherOpen)}
              className="w-full flex items-center justify-center lg:justify-start gap-3 p-2 rounded hover:bg-slate-800 transition-colors"
@@ -451,7 +609,6 @@ const App: React.FC = () => {
 
       {/* Main Content */}
       <main className="flex-1 flex flex-col h-screen overflow-hidden relative">
-        {/* Header */}
         <header className="h-16 bg-white border-b border-slate-200 flex items-center justify-between px-6 shadow-sm z-10 gap-4">
           
           <div className="flex items-center gap-4">
@@ -466,7 +623,7 @@ const App: React.FC = () => {
                 <span className="hidden sm:inline">Calendário</span>
               </button>
               <button
-                onClick={() => setViewMode('LIST')}
+                onClick={() => { setViewMode('LIST'); setFilterStatus('ALL'); }}
                 className={`flex items-center gap-2 px-3 py-1.5 text-xs sm:text-sm font-medium rounded-md transition-all ${
                   viewMode === 'LIST' ? 'bg-white shadow-sm text-indigo-600' : 'text-slate-500 hover:text-slate-700'
                 }`}
@@ -478,7 +635,7 @@ const App: React.FC = () => {
 
             <div className="h-6 w-px bg-slate-200 mx-2 hidden sm:block"></div>
 
-            {(viewMode === 'CALENDAR' || viewMode === 'LIST') && (
+            {(viewMode === 'CALENDAR' || viewMode === 'LIST' || viewMode === 'DASHBOARD') && (
                <div className="flex items-center gap-2">
                  <Filter size={16} className="text-slate-400" />
                  <select 
@@ -503,6 +660,53 @@ const App: React.FC = () => {
           </div>
           
           <div className="flex items-center gap-6">
+            {/* Notifications */}
+            <div className="relative" ref={notificationRef}>
+              <button 
+                onClick={() => setIsNotificationsOpen(!isNotificationsOpen)}
+                className="text-slate-400 hover:text-indigo-600 transition-colors relative"
+              >
+                 <Bell size={20} />
+                 {myNotifications.length > 0 && (
+                   <span className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-red-500 rounded-full border-2 border-white animate-bounce"></span>
+                 )}
+              </button>
+              
+              {isNotificationsOpen && (
+                 <div className="absolute right-0 top-full mt-2 w-72 bg-white border border-slate-200 rounded-xl shadow-xl z-50 overflow-hidden">
+                    <div className="bg-slate-50 px-4 py-2 border-b border-slate-100 text-xs font-bold text-slate-500">
+                        Notificações ({myNotifications.length})
+                    </div>
+                    <div className="max-h-64 overflow-y-auto custom-scrollbar">
+                       {myNotifications.length === 0 ? (
+                         <div className="p-4 text-center text-xs text-slate-400">Nenhuma notificação nova.</div>
+                       ) : (
+                        myNotifications.map(n => (
+                           <div key={n.id} className="p-3 border-b border-slate-50 hover:bg-slate-50 transition-colors">
+                              <p className={`text-sm mb-1 ${n.type === 'NUDGE' ? 'text-amber-700 font-bold' : 'text-slate-800'}`}>
+                                 {n.message || 'Nova Notificação'}
+                              </p>
+                              <span className="text-[10px] text-slate-400 font-medium">
+                                 {format(safeDate(n.date), 'dd/MM HH:mm')}
+                              </span>
+                           </div>
+                         ))
+                       )}
+                    </div>
+                    {myNotifications.length > 0 && (
+                        <div className="bg-slate-50 p-2 text-center border-t border-slate-100">
+                            <button 
+                                onClick={handleMarkAsRead} 
+                                className="text-xs text-indigo-600 font-medium hover:underline"
+                            >
+                                Marcar como lidas
+                            </button>
+                        </div>
+                    )}
+                 </div>
+              )}
+            </div>
+
             {/* Change Password Button */}
             <button 
                onClick={handleChangePasswordClick}
@@ -531,7 +735,7 @@ const App: React.FC = () => {
               <Calendar 
                 tasks={displayedTasks} 
                 users={teamUsers}
-                alertPeriods={alertPeriods}
+                alertPeriods={displayedAlerts}
                 currentUser={currentUser}
                 onAddTask={handleAddTask}
                 onEditTask={handleEditTask}
@@ -544,8 +748,12 @@ const App: React.FC = () => {
               />
             ) : (
               <DashboardView 
-                tasks={tasks} 
+                tasks={displayedTasks} 
                 users={teamUsers}
+                onFilterRequest={(status) => {
+                   setFilterStatus(status);
+                   setViewMode('LIST');
+                }}
               />
             )}
           </div>
@@ -661,13 +869,18 @@ const App: React.FC = () => {
         isOpen={isAlertModalOpen}
         onClose={() => setIsAlertModalOpen(false)}
         onSave={handleSaveAlert}
+        onDelete={handleDeleteAlert}
+        alertPeriods={alertPeriods}
+        teams={teams}
       />
 
       <PresencialModal 
         isOpen={isPresencialModalOpen}
         onClose={() => setIsPresencialModalOpen(false)}
         users={teamUsers}
-        onTogglePresence={handleTogglePresence}
+        teams={teams}
+        currentUser={currentUser}
+        onSavePresence={handleBatchUpdatePresence}
       />
     </div>
   );
