@@ -1,9 +1,9 @@
 
-import { Task, User, AlertPeriod, Team } from '../types';
+import { Task, User, AlertPeriod, Team, Note } from '../types';
 import { format } from 'date-fns';
 
 // --- CONFIGURAÇÃO DA API ---
-const HARDCODED_API_URL = 'https://script.google.com/macros/s/AKfycbzYNu9yGIZaha7vZZaiH8cvf7wImihkzTRFpCuq51ahmA3YGZ-pCsEF5WinABa_F2uxSg/exec'; 
+const HARDCODED_API_URL = 'https://script.google.com/macros/s/AKfycbxq8rmU57n3I0qVxfAf3cjiKflAlkd1_8ixNEcGpjH0CwjcslQCz4ht7308Jmj88yDFDA/exec'; 
 
 let API_URL = HARDCODED_API_URL && HARDCODED_API_URL.startsWith('http') 
   ? HARDCODED_API_URL 
@@ -25,44 +25,36 @@ const sendRequest = async (action: string, data?: any) => {
      throw new Error('API URL not configured');
   }
 
-  // Cache busting param to prevent browser from serving stale "disconnected" responses
+  // Cache busting param
   const cacheBuster = `&_t=${new Date().getTime()}`;
   const url = `${API_URL}?action=${action}${cacheBuster}`;
 
   try {
     let response;
     
-    // Configuração para CORS e evitar cache
+    // Configuração para CORS
     const requestOptions: RequestInit = {
        cache: 'no-store',
-       headers: {
-          'Content-Type': 'text/plain;charset=utf-8',
-       }
+       headers: { 'Content-Type': 'text/plain;charset=utf-8' }
     };
 
     if (action === 'read') {
       response = await fetch(`${API_URL}?action=read${cacheBuster}`, {
-         ...requestOptions,
-         method: 'GET'
+         ...requestOptions, method: 'GET'
       });
     } else {
       response = await fetch(`${API_URL}?action=${action}${cacheBuster}`, {
-        ...requestOptions,
-        method: 'POST',
-        body: JSON.stringify(data),
+        ...requestOptions, method: 'POST', body: JSON.stringify(data),
       });
     }
 
-    if (!response.ok) {
-       throw new Error(`HTTP Error: ${response.status}`);
-    }
+    if (!response.ok) throw new Error(`HTTP Error: ${response.status}`);
 
     const text = await response.text();
     
     try {
       const json = JSON.parse(text);
       if (json.error) {
-        // If server is busy (lock timeout), we throw specific error to maybe retry
         if (json.error.includes("Server busy")) throw new Error("BUSY");
         throw new Error("Server Error: " + json.error);
       }
@@ -80,7 +72,7 @@ const sendRequest = async (action: string, data?: any) => {
 };
 
 export const api = {
-  sync: async (): Promise<{ tasks: any[], users: any[], alerts: any[], teams: any[] }> => {
+  sync: async (): Promise<{ tasks: any[], users: any[], alerts: any[], teams: any[], notes: any[] }> => {
     return sendRequest('read');
   },
   
@@ -90,6 +82,16 @@ export const api = {
       date: format(task.date, 'yyyy-MM-dd'),
       teamProgress: JSON.stringify(task.teamProgress || {})
     });
+  },
+
+  // Nova função para salvar várias tarefas (Recorrência)
+  saveTasksBatch: async (tasks: Task[]) => {
+    const payload = tasks.map(t => ({
+      ...t,
+      date: format(t.date, 'yyyy-MM-dd'),
+      teamProgress: JSON.stringify(t.teamProgress || {})
+    }));
+    return sendRequest('saveTasksBatch', payload);
   },
 
   deleteTask: async (taskId: string) => {
@@ -126,5 +128,16 @@ export const api = {
 
   deleteAlert: async (alertId: string) => {
     return sendRequest('deleteAlert', { id: alertId });
+  },
+
+  saveNote: async (note: Note) => {
+    return sendRequest('saveNote', {
+        ...note,
+        updatedAt: format(note.updatedAt, 'yyyy-MM-dd HH:mm:ss')
+    });
+  },
+
+  deleteNote: async (noteId: string) => {
+    return sendRequest('deleteNote', { id: noteId });
   }
 };

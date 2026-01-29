@@ -9,11 +9,12 @@ import DashboardView from './components/DashboardView';
 import PresencialModal from './components/PresencialModal';
 import UserAuthModal from './components/UserAuthModal'; 
 import LoginScreen from './components/LoginScreen';
+import NotesModal from './components/NotesModal';
 
-import { User, Task, AlertPeriod, Team, Notification, TaskStatus } from './types';
+import { User, Task, AlertPeriod, Team, Notification, TaskStatus, Note } from './types';
 import { USERS, INITIAL_TASKS, INITIAL_TEAMS } from './constants';
 import { api, getApiUrl } from './services/api';
-import { Layout, CheckSquare, List, Calendar as CalendarIcon, Settings, PieChart, MapPin, AlertTriangle, Users, Database, Loader2, Filter, KeyRound, Bell, LogOut, RefreshCw } from 'lucide-react';
+import { Layout, CheckSquare, List, Calendar as CalendarIcon, Settings, PieChart, MapPin, AlertTriangle, Users, Database, Loader2, Filter, KeyRound, Bell, LogOut, RefreshCw, StickyNote } from 'lucide-react';
 import { format, isValid } from 'date-fns';
 
 const App: React.FC = () => {
@@ -31,6 +32,7 @@ const App: React.FC = () => {
   const [teams, setTeams] = useState<Team[]>([]);
   const [alertPeriods, setAlertPeriods] = useState<AlertPeriod[]>([]);
   const [notifications, setNotifications] = useState<Notification[]>([]);
+  const [notes, setNotes] = useState<Note[]>([]); // New State for Notes
   
   const [viewMode, setViewMode] = useState<'CALENDAR' | 'LIST' | 'DASHBOARD'>('CALENDAR');
   const [filterScope, setFilterScope] = useState<string>('MY_TEAM'); 
@@ -43,6 +45,7 @@ const App: React.FC = () => {
   const [isPresencialModalOpen, setIsPresencialModalOpen] = useState(false);
   const [isUserSwitcherOpen, setIsUserSwitcherOpen] = useState(false);
   const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
+  const [isNotesOpen, setIsNotesOpen] = useState(false); // New Notes Modal
 
   // Auth Modal State
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
@@ -80,7 +83,6 @@ const App: React.FC = () => {
   // --- API & SYNC LOGIC ---
   const fetchData = async (): Promise<boolean> => {
     if (!getApiUrl()) {
-        // Fallback demo mode if no URL is hardcoded
         setTasks(INITIAL_TASKS);
         setTeamUsers(USERS);
         setTeams(INITIAL_TEAMS);
@@ -92,7 +94,7 @@ const App: React.FC = () => {
       setIsSyncing(true);
       const data = await api.sync();
       
-      // PARSE TASKS
+      // Parse Tasks
       const parsedTasks: Task[] = data.tasks.map((t: any) => {
         let dateObj;
         if (typeof t.date === 'string' && t.date.includes('-') && !t.date.includes('T')) {
@@ -119,7 +121,6 @@ const App: React.FC = () => {
           return strVal;
         };
 
-        // Handle teamProgress JSON string if it comes from stringified source
         let tp = t.teamProgress;
         if (typeof tp === 'string') {
           try { tp = JSON.parse(tp); } catch(e) { tp = {}; }
@@ -135,45 +136,45 @@ const App: React.FC = () => {
         };
       });
 
+      // Parse Alerts
       const parsedAlerts: AlertPeriod[] = data.alerts.map((a: any) => {
          let start, end;
-         if (typeof a.startDate === 'string') {
-            const datePart = a.startDate.substring(0, 10);
-            if (datePart.match(/^\d{4}-\d{2}-\d{2}$/)) {
-               const [y, m, d] = datePart.split('-').map(Number);
-               start = new Date(y, m - 1, d);
-            } else start = new Date(a.startDate);
-         } else start = new Date(a.startDate);
-
-         if (typeof a.endDate === 'string') {
-             const datePart = a.endDate.substring(0, 10);
-             if (datePart.match(/^\d{4}-\d{2}-\d{2}$/)) {
-                const [y, m, d] = datePart.split('-').map(Number);
-                end = new Date(y, m - 1, d);
-             } else end = new Date(a.endDate);
-         } else end = new Date(a.endDate);
-
-         return { ...a, startDate: start, endDate: end };
+         const parseD = (dStr: any) => {
+             if (typeof dStr === 'string') {
+                const datePart = dStr.substring(0, 10);
+                if (datePart.match(/^\d{4}-\d{2}-\d{2}$/)) {
+                   const [y, m, d] = datePart.split('-').map(Number);
+                   return new Date(y, m - 1, d);
+                } 
+                return new Date(dStr);
+             } 
+             return new Date(dStr);
+         };
+         return { ...a, startDate: parseD(a.startDate), endDate: parseD(a.endDate) };
       });
 
+      // Parse Users
       const parsedUsers: User[] = data.users.map((u: any) => ({
         ...u,
         presencialDates: Array.isArray(u.presencialDates) ? u.presencialDates : [],
         password: (u.password !== undefined && u.password !== null && u.password !== '') ? String(u.password) : undefined
       }));
       
+      // Parse Notes
+      const parsedNotes: Note[] = (data.notes || []).map((n: any) => ({
+         ...n,
+         updatedAt: new Date(n.updatedAt)
+      }));
+
       const parsedTeams: Team[] = data.teams || [];
 
       updateNotifications(parsedTasks);
       isFirstLoadRef.current = false;
       setTasks(parsedTasks);
+      setNotes(parsedNotes);
       
-      // Update Users List (merging passwords if needed locally, but usually fresh from API)
-      if (parsedUsers.length > 0) {
-        setTeamUsers(parsedUsers);
-      } else {
-        setTeamUsers(USERS); // Fallback
-      }
+      if (parsedUsers.length > 0) setTeamUsers(parsedUsers);
+      else setTeamUsers(USERS); 
 
       if (parsedTeams.length > 0) setTeams(parsedTeams);
       else setTeams(INITIAL_TEAMS);
@@ -184,8 +185,6 @@ const App: React.FC = () => {
       return true;
     } catch (error) {
       console.error("Sync Error", error);
-      // Only set error if it wasn't already connected, or if we want to show a warning
-      // but lets be explicit
       setConnectionStatus('ERROR');
       setIsLoadingInitial(false);
       return false;
@@ -194,11 +193,10 @@ const App: React.FC = () => {
     }
   };
 
-  // Initial Fetch on Mount
+  // Initial Fetch & Interval Update (2 Minutes)
   useEffect(() => {
     fetchData();
-    // 60 seconds interval
-    const intervalId = setInterval(fetchData, 60000); 
+    const intervalId = setInterval(fetchData, 120000); // 2 minutes
     return () => clearInterval(intervalId);
   }, []); 
 
@@ -213,7 +211,6 @@ const App: React.FC = () => {
          currentTasks.forEach(task => {
              if (task.isNudged) {
                  const notifId = `${task.id}_nudge`;
-                 // Logic updated: If it's a team task, verify if *I* am responsible
                  const isMyResponsibility = task.assigneeId === myId || (teams.some(t => t.id === task.assigneeId) && currentUserRef.current.teamId === task.assigneeId);
 
                  if (isMyResponsibility && !readIds.includes(notifId) && !currentIds.has(notifId)) {
@@ -234,8 +231,6 @@ const App: React.FC = () => {
          if (!isFirstLoadRef.current && tasksRef.current.length > 0) {
             currentTasks.forEach(newTask => {
                 const oldTask = tasksRef.current.find(t => t.id === newTask.id);
-                // Notification for assignments
-                // Only notify if assignment CHANGED or it's new
                 if ((!oldTask || oldTask.assigneeId !== newTask.assigneeId)) {
                    const isAssignedToMe = newTask.assigneeId === myId;
                    const isAssignedToMyTeam = teams.some(t => t.id === newTask.assigneeId) && currentUserRef.current.teamId === newTask.assigneeId;
@@ -274,7 +269,7 @@ const App: React.FC = () => {
      setNotifications(prev => prev.filter(n => n.targetUserId !== currentUser.id));
   };
 
-  // --- LOGIN FLOW HANDLERS ---
+  // --- HANDLERS ---
   const handleLoginClick = (user: User) => {
     setAuthTargetUser(user);
     setAuthMode('LOGIN');
@@ -299,7 +294,6 @@ const App: React.FC = () => {
     setIsUserSwitcherOpen(false);
   };
 
-  // --- AUTH HANDLERS (Inside App) ---
   const handleUserSwitchClick = (user: User) => {
     setAuthTargetUser(user);
     setAuthMode('LOGIN');
@@ -330,17 +324,26 @@ const App: React.FC = () => {
   const handleAddTask = (date: Date) => { setSelectedDate(date); setSelectedTask(null); setIsModalOpen(true); };
   const handleEditTask = (task: Task) => { setSelectedTask(task); setSelectedDate(task.date); setIsModalOpen(true); };
   
-  const handleSaveTask = async (taskToSave: Task) => {
-    const safeTask = { 
-       ...taskToSave, 
-       title: taskToSave.title || 'Sem título',
-       teamProgress: taskToSave.teamProgress || {} // Ensure property exists
-    };
-    setTasks(prev => {
-      const exists = prev.find(t => t.id === safeTask.id);
-      return exists ? prev.map(t => t.id === safeTask.id ? safeTask : t) : [...prev, safeTask];
-    });
-    if (getApiUrl()) { await api.saveTask(safeTask); fetchData(); }
+  // Updated to support Batch saving (recurrence)
+  const handleSaveTask = async (taskOrTasks: Task | Task[]) => {
+    if (Array.isArray(taskOrTasks)) {
+        // Batch
+        const newTasks = taskOrTasks;
+        setTasks(prev => [...prev, ...newTasks]);
+        if (getApiUrl()) { await api.saveTasksBatch(newTasks); fetchData(); }
+    } else {
+        // Single
+        const safeTask = { 
+           ...taskOrTasks, 
+           title: taskOrTasks.title || 'Sem título',
+           teamProgress: taskOrTasks.teamProgress || {} 
+        };
+        setTasks(prev => {
+          const exists = prev.find(t => t.id === safeTask.id);
+          return exists ? prev.map(t => t.id === safeTask.id ? safeTask : t) : [...prev, safeTask];
+        });
+        if (getApiUrl()) { await api.saveTask(safeTask); fetchData(); }
+    }
   };
 
   const handleDeleteTask = async (taskId: string) => {
@@ -393,6 +396,16 @@ const App: React.FC = () => {
      if (getApiUrl()) { await api.deleteAlert(alertId); fetchData(); }
   };
 
+  const handleSaveNote = async (newNote: Note) => {
+      setNotes(prev => [newNote, ...prev]);
+      if (getApiUrl()) { await api.saveNote(newNote); fetchData(); }
+  };
+
+  const handleDeleteNote = async (noteId: string) => {
+      setNotes(prev => prev.filter(n => n.id !== noteId));
+      if (getApiUrl()) { await api.deleteNote(noteId); fetchData(); }
+  };
+
   const handleBatchUpdatePresence = async (updatedUsers: User[]) => {
      setTeamUsers(prev => prev.map(u => updatedUsers.find(upd => upd.id === u.id) || u));
      if (getApiUrl()) { await api.saveUsersBatch(updatedUsers); fetchData(); }
@@ -402,19 +415,15 @@ const App: React.FC = () => {
   const isCoordinator = currentUser.role === 'COORDINATOR';
 
   const displayedTasks = tasks.filter(task => {
-    // Check if task is assigned to a User OR a Team
     const assigneeUser = teamUsers.find(u => u.id === task.assigneeId);
     const assigneeTeam = teams.find(t => t.id === task.assigneeId);
     
     let passesScope = false;
     
-    // Scope Logic
     if (filterScope === 'ME') {
-        // Show if assigned to ME directly OR assigned to MY TEAM (Group Task)
         passesScope = task.assigneeId === currentUser.id || task.assigneeId === currentUser.teamId;
     }
     else if (filterScope === 'MY_TEAM') {
-        // Show if assigned user belongs to my team OR assigned directly to my team
         if (assigneeUser) passesScope = assigneeUser.teamId === currentUser.teamId;
         else if (assigneeTeam) passesScope = assigneeTeam.id === currentUser.teamId;
         else passesScope = false; 
@@ -423,7 +432,6 @@ const App: React.FC = () => {
         passesScope = true;
     }
     else {
-        // Specific Team ID selected
         if (assigneeUser) passesScope = assigneeUser.teamId === filterScope;
         else if (assigneeTeam) passesScope = assigneeTeam.id === filterScope;
     }
@@ -446,19 +454,8 @@ const App: React.FC = () => {
   if (!isAuthenticated) {
      return (
        <>
-         <LoginScreen 
-            users={teamUsers} 
-            teams={teams}
-            onLogin={handleLoginClick} 
-            isLoading={isLoadingInitial}
-         />
-         <UserAuthModal 
-            isOpen={isAuthModalOpen}
-            onClose={() => setIsAuthModalOpen(false)}
-            targetUser={authTargetUser}
-            mode={authMode}
-            onSuccess={handleLoginSuccess}
-         />
+         <LoginScreen users={teamUsers} teams={teams} onLogin={handleLoginClick} isLoading={isLoadingInitial} />
+         <UserAuthModal isOpen={isAuthModalOpen} onClose={() => setIsAuthModalOpen(false)} targetUser={authTargetUser} mode={authMode} onSuccess={handleLoginSuccess} />
        </>
      );
   }
@@ -494,6 +491,11 @@ const App: React.FC = () => {
             <span className="hidden lg:inline">Escala Presencial</span>
           </button>
           
+          <button onClick={() => setIsNotesOpen(!isNotesOpen)} className={`w-full px-3 py-3 rounded-lg flex items-center justify-center lg:justify-start gap-3 font-medium transition-colors ${isNotesOpen ? 'bg-amber-100 text-amber-800' : 'hover:bg-slate-800 text-slate-400'}`}>
+            <StickyNote size={20} />
+            <span className="hidden lg:inline">Minhas Notas</span>
+          </button>
+
           {isLeader && (
             <>
               <div className="my-2 border-t border-slate-800"></div>
@@ -578,28 +580,14 @@ const App: React.FC = () => {
           
           <div className="flex items-center gap-4">
             <div className="flex bg-slate-100 p-1 rounded-lg">
-              <button
-                onClick={() => setViewMode('CALENDAR')}
-                className={`flex items-center gap-2 px-3 py-1.5 text-xs sm:text-sm font-medium rounded-md transition-all ${
-                  viewMode === 'CALENDAR' ? 'bg-white shadow-sm text-indigo-600' : 'text-slate-500 hover:text-slate-700'
-                }`}
-              >
-                <CalendarIcon size={16} />
-                <span className="hidden sm:inline">Calendário</span>
+              <button onClick={() => setViewMode('CALENDAR')} className={`flex items-center gap-2 px-3 py-1.5 text-xs sm:text-sm font-medium rounded-md transition-all ${viewMode === 'CALENDAR' ? 'bg-white shadow-sm text-indigo-600' : 'text-slate-500 hover:text-slate-700'}`}>
+                <CalendarIcon size={16} /> <span className="hidden sm:inline">Calendário</span>
               </button>
-              <button
-                onClick={() => { setViewMode('LIST'); setFilterStatus('ALL'); }}
-                className={`flex items-center gap-2 px-3 py-1.5 text-xs sm:text-sm font-medium rounded-md transition-all ${
-                  viewMode === 'LIST' ? 'bg-white shadow-sm text-indigo-600' : 'text-slate-500 hover:text-slate-700'
-                }`}
-              >
-                <List size={16} />
-                <span className="hidden sm:inline">Lista</span>
+              <button onClick={() => { setViewMode('LIST'); setFilterStatus('ALL'); }} className={`flex items-center gap-2 px-3 py-1.5 text-xs sm:text-sm font-medium rounded-md transition-all ${viewMode === 'LIST' ? 'bg-white shadow-sm text-indigo-600' : 'text-slate-500 hover:text-slate-700'}`}>
+                <List size={16} /> <span className="hidden sm:inline">Lista</span>
               </button>
             </div>
-
             <div className="h-6 w-px bg-slate-200 mx-2 hidden sm:block"></div>
-
             {(viewMode === 'CALENDAR' || viewMode === 'LIST' || viewMode === 'DASHBOARD') && (
                <div className="flex items-center gap-2">
                  <Filter size={16} className="text-slate-400" />
@@ -614,9 +602,7 @@ const App: React.FC = () => {
                       <>
                         <option disabled>──────────</option>
                         <option value="ALL_TEAMS">Todas as Equipes</option>
-                        {teams.map(team => (
-                          <option key={team.id} value={team.id}>Equipe: {team.name}</option>
-                        ))}
+                        {teams.map(team => <option key={team.id} value={team.id}>Equipe: {team.name}</option>)}
                       </>
                     )}
                  </select>
@@ -626,44 +612,23 @@ const App: React.FC = () => {
           
           <div className="flex items-center gap-6">
             <div className="relative" ref={notificationRef}>
-              <button 
-                onClick={() => setIsNotificationsOpen(!isNotificationsOpen)}
-                className="text-slate-400 hover:text-indigo-600 transition-colors relative"
-              >
+              <button onClick={() => setIsNotificationsOpen(!isNotificationsOpen)} className="text-slate-400 hover:text-indigo-600 transition-colors relative">
                  <Bell size={20} />
-                 {myNotifications.length > 0 && (
-                   <span className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-red-500 rounded-full border-2 border-white animate-bounce"></span>
-                 )}
+                 {myNotifications.length > 0 && <span className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-red-500 rounded-full border-2 border-white animate-bounce"></span>}
               </button>
-              
               {isNotificationsOpen && (
                  <div className="absolute right-0 top-full mt-2 w-72 bg-white border border-slate-200 rounded-xl shadow-xl z-50 overflow-hidden">
-                    <div className="bg-slate-50 px-4 py-2 border-b border-slate-100 text-xs font-bold text-slate-500">
-                        Notificações ({myNotifications.length})
-                    </div>
+                    <div className="bg-slate-50 px-4 py-2 border-b border-slate-100 text-xs font-bold text-slate-500">Notificações ({myNotifications.length})</div>
                     <div className="max-h-64 overflow-y-auto custom-scrollbar">
-                       {myNotifications.length === 0 ? (
-                         <div className="p-4 text-center text-xs text-slate-400">Nenhuma notificação nova.</div>
-                       ) : (
+                       {myNotifications.length === 0 ? <div className="p-4 text-center text-xs text-slate-400">Nenhuma notificação nova.</div> : 
                         myNotifications.map(n => (
                            <div key={n.id} className="p-3 border-b border-slate-50 hover:bg-slate-50 transition-colors">
-                              <p className={`text-sm mb-1 ${n.type === 'NUDGE' ? 'text-amber-700 font-bold' : 'text-slate-800'}`}>
-                                 {n.message || 'Nova Notificação'}
-                              </p>
-                              <span className="text-[10px] text-slate-400 font-medium">
-                                 {format(safeDate(n.date), 'dd/MM HH:mm')}
-                              </span>
+                              <p className={`text-sm mb-1 ${n.type === 'NUDGE' ? 'text-amber-700 font-bold' : 'text-slate-800'}`}>{n.message || 'Nova Notificação'}</p>
+                              <span className="text-[10px] text-slate-400 font-medium">{format(safeDate(n.date), 'dd/MM HH:mm')}</span>
                            </div>
-                         ))
-                       )}
+                         ))}
                     </div>
-                    {myNotifications.length > 0 && (
-                        <div className="bg-slate-50 p-2 text-center border-t border-slate-100">
-                            <button onClick={handleMarkAsRead} className="text-xs text-indigo-600 font-medium hover:underline">
-                                Marcar como lidas
-                            </button>
-                        </div>
-                    )}
+                    {myNotifications.length > 0 && <div className="bg-slate-50 p-2 text-center border-t border-slate-100"><button onClick={handleMarkAsRead} className="text-xs text-indigo-600 font-medium hover:underline">Marcar como lidas</button></div>}
                  </div>
               )}
             </div>
@@ -684,7 +649,18 @@ const App: React.FC = () => {
           </div>
         </header>
 
-        <div className="flex-1 p-4 lg:p-6 overflow-hidden flex flex-col bg-slate-50">
+        <div className="flex-1 p-4 lg:p-6 overflow-hidden flex flex-col bg-slate-50 relative">
+          
+          {/* Notes Sidebar Modal */}
+          <NotesModal 
+             isOpen={isNotesOpen}
+             onClose={() => setIsNotesOpen(false)}
+             notes={notes}
+             currentUser={currentUser}
+             onSaveNote={handleSaveNote}
+             onDeleteNote={handleDeleteNote}
+          />
+
           <div className="flex-1 h-full min-h-0">
             {viewMode === 'CALENDAR' ? (
               <Calendar 
@@ -718,16 +694,7 @@ const App: React.FC = () => {
         </div>
       </main>
 
-      {/* Auth Modal (Password Change / Login inside app) */}
-      <UserAuthModal 
-        isOpen={isAuthModalOpen}
-        onClose={() => setIsAuthModalOpen(false)}
-        targetUser={authTargetUser}
-        mode={authMode}
-        onSuccess={handleAuthModalSuccess}
-      />
-
-      {/* Other Modals */}
+      <UserAuthModal isOpen={isAuthModalOpen} onClose={() => setIsAuthModalOpen(false)} targetUser={authTargetUser} mode={authMode} onSuccess={handleAuthModalSuccess} />
       <TaskModal 
         isOpen={isModalOpen}
         onClose={() => setIsModalOpen(false)}
@@ -740,36 +707,9 @@ const App: React.FC = () => {
         users={teamUsers}
         teams={teams}
       />
-      
-      <TeamModal 
-        isOpen={isTeamModalOpen}
-        onClose={() => setIsTeamModalOpen(false)}
-        users={teamUsers}
-        teams={teams}
-        onAddUser={handleAddUser}
-        onEditUser={handleEditUser}
-        onRemoveUser={handleRemoveUser}
-        onAddTeam={handleAddTeam}
-        onRemoveTeam={handleRemoveTeam}
-      />
-
-      <AlertModal 
-        isOpen={isAlertModalOpen}
-        onClose={() => setIsAlertModalOpen(false)}
-        onSave={handleSaveAlert}
-        onDelete={handleDeleteAlert}
-        alertPeriods={alertPeriods}
-        teams={teams}
-      />
-
-      <PresencialModal 
-        isOpen={isPresencialModalOpen}
-        onClose={() => setIsPresencialModalOpen(false)}
-        users={teamUsers}
-        teams={teams}
-        currentUser={currentUser}
-        onSavePresence={handleBatchUpdatePresence}
-      />
+      <TeamModal isOpen={isTeamModalOpen} onClose={() => setIsTeamModalOpen(false)} users={teamUsers} teams={teams} onAddUser={handleAddUser} onEditUser={handleEditUser} onRemoveUser={handleRemoveUser} onAddTeam={handleAddTeam} onRemoveTeam={handleRemoveTeam} />
+      <AlertModal isOpen={isAlertModalOpen} onClose={() => setIsAlertModalOpen(false)} onSave={handleSaveAlert} onDelete={handleDeleteAlert} alertPeriods={alertPeriods} teams={teams} />
+      <PresencialModal isOpen={isPresencialModalOpen} onClose={() => setIsPresencialModalOpen(false)} users={teamUsers} teams={teams} currentUser={currentUser} onSavePresence={handleBatchUpdatePresence} />
     </div>
   );
 };

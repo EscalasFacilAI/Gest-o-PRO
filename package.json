@@ -1,11 +1,11 @@
 {
-  "name": "gestãopro-team-calendar",
+  "name": "gestorpro-team-calendar",
   "private": true,
   "version": "0.0.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vite build --base=/Gest-o-PRO/",
+    "build": "vite build",
     "preview": "vite preview"
   },
   "dependencies": {

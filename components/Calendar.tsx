@@ -6,9 +6,9 @@ import {
   format, isToday, isWithinInterval 
 } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
-import { ChevronLeft, ChevronRight, Plus, AlertTriangle, Users } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Plus, AlertTriangle, Users, X, Clock } from 'lucide-react';
 import { Task, User, normalizeDate, AlertPeriod, ALERT_COLOR_MAP, Team } from '../types';
-import { STATUS_COLORS } from '../constants';
+import { STATUS_COLORS, STATUS_LABELS } from '../constants';
 
 interface CalendarProps {
   tasks: Task[];
@@ -22,6 +22,7 @@ interface CalendarProps {
 
 const Calendar: React.FC<CalendarProps> = ({ tasks, users, teams, alertPeriods, currentUser, onAddTask, onEditTask }) => {
   const [currentDate, setCurrentDate] = useState(new Date());
+  const [expandedDay, setExpandedDay] = useState<Date | null>(null);
 
   const firstDayOfMonth = startOfMonth(currentDate);
   const lastDayOfMonth = endOfMonth(currentDate);
@@ -40,8 +41,9 @@ const Calendar: React.FC<CalendarProps> = ({ tasks, users, teams, alertPeriods, 
       .sort((a, b) => (a.startTime || '').localeCompare(b.startTime || ''));
   };
 
-  const getAlertForDay = (date: Date) => {
-    return alertPeriods.find(period => 
+  // Allow multiple alerts per day
+  const getAlertsForDay = (date: Date) => {
+    return alertPeriods.filter(period => 
       isWithinInterval(normalizeDate(date), { 
         start: normalizeDate(period.startDate), 
         end: normalizeDate(period.endDate) 
@@ -49,9 +51,115 @@ const Calendar: React.FC<CalendarProps> = ({ tasks, users, teams, alertPeriods, 
     );
   };
 
+  const DayExpandedModal = () => {
+    if (!expandedDay) return null;
+    const dayTasks = getTasksForDay(expandedDay);
+    const dayAlerts = getAlertsForDay(expandedDay);
+    
+    return (
+      <div className="absolute inset-0 z-40 bg-white/95 backdrop-blur-sm flex flex-col p-6 animate-in fade-in zoom-in duration-200">
+         <div className="flex justify-between items-center mb-6 border-b border-slate-200 pb-4">
+             <div>
+                <h2 className="text-3xl font-bold text-slate-800 capitalize">
+                    {format(expandedDay, "EEEE, d 'de' MMMM", { locale: ptBR })}
+                </h2>
+                {isToday(expandedDay) && <span className="text-sm font-bold text-indigo-600 uppercase">Hoje</span>}
+             </div>
+             <div className="flex gap-3">
+                 <button 
+                   onClick={() => onAddTask(expandedDay)}
+                   className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg font-medium transition-colors shadow-lg"
+                 >
+                    <Plus size={18} /> Nova Demanda
+                 </button>
+                 <button 
+                   onClick={() => setExpandedDay(null)}
+                   className="bg-slate-100 hover:bg-slate-200 text-slate-600 p-2 rounded-lg transition-colors"
+                 >
+                    <X size={24} />
+                 </button>
+             </div>
+         </div>
+
+         <div className="flex-1 overflow-y-auto custom-scrollbar">
+             {/* Alerts Section in Expanded View */}
+             {dayAlerts.length > 0 && (
+                <div className="mb-6 flex flex-wrap gap-2">
+                   {dayAlerts.map(alert => (
+                      <div key={alert.id} className={`${ALERT_COLOR_MAP[alert.color].bg} ${ALERT_COLOR_MAP[alert.color].text} border ${ALERT_COLOR_MAP[alert.color].border} px-3 py-1.5 rounded-full text-sm font-bold flex items-center gap-2`}>
+                         <AlertTriangle size={16} /> {alert.label}
+                      </div>
+                   ))}
+                </div>
+             )}
+
+             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                 {dayTasks.length === 0 && (
+                    <div className="col-span-full text-center text-slate-400 py-12 text-lg">
+                       Nenhuma demanda agendada para este dia.
+                    </div>
+                 )}
+                 {dayTasks.map(task => {
+                    const assignee = users.find(u => u.id === task.assigneeId);
+                    const assignedTeam = !assignee ? teams.find(t => t.id === task.assigneeId) : null;
+                    let progressPercent = 0;
+                    if (assignedTeam) {
+                        const teamMembers = users.filter(u => u.teamId === assignedTeam.id);
+                        const doneCount = teamMembers.filter(u => task.teamProgress?.[u.id] === 'DONE').length;
+                        progressPercent = teamMembers.length > 0 ? Math.round((doneCount / teamMembers.length) * 100) : 0;
+                    }
+
+                    return (
+                       <div 
+                         key={task.id}
+                         onClick={() => onEditTask(task)}
+                         className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm hover:shadow-md hover:border-indigo-300 transition-all cursor-pointer group"
+                       >
+                           <div className="flex justify-between items-start mb-2">
+                               <div className="flex items-center gap-1.5 text-sm font-semibold text-slate-500 bg-slate-50 px-2 py-1 rounded">
+                                   <Clock size={14} />
+                                   {task.startTime || '--:--'} - {task.endTime || '--:--'}
+                               </div>
+                               <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold border ${STATUS_COLORS[task.status]}`}>
+                                   {STATUS_LABELS[task.status]}
+                               </span>
+                           </div>
+                           
+                           <h3 className="text-base font-bold text-slate-800 mb-2 group-hover:text-indigo-700 transition-colors">
+                             {task.title}
+                           </h3>
+                           
+                           {assignedTeam ? (
+                              <div className="mt-3">
+                                 <div className="flex justify-between text-xs text-slate-500 mb-1">
+                                    <span>Equipe: {assignedTeam.name}</span>
+                                    <span>{progressPercent}%</span>
+                                 </div>
+                                 <div className="w-full h-1.5 bg-slate-100 rounded-full overflow-hidden">
+                                     <div className="bg-indigo-500 h-full" style={{ width: `${progressPercent}%` }}></div>
+                                 </div>
+                              </div>
+                           ) : assignee && (
+                              <div className="flex items-center gap-2 mt-3 pt-3 border-t border-slate-50">
+                                 <img src={assignee.avatar} className="w-6 h-6 rounded-full" alt=""/>
+                                 <span className="text-sm text-slate-600">{assignee.name}</span>
+                              </div>
+                           )}
+                       </div>
+                    )
+                 })}
+             </div>
+         </div>
+      </div>
+    );
+  };
+
   return (
-    <div className="flex flex-col h-full bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+    <div className="flex flex-col h-full bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden relative">
       
+      {/* Expanded Modal Overlay */}
+      <DayExpandedModal />
+
       {/* Calendar Header */}
       <div className="flex-none flex items-center justify-between px-6 py-4 border-b border-slate-100 bg-white z-10">
         <div className="flex items-center gap-4">
@@ -92,108 +200,66 @@ const Calendar: React.FC<CalendarProps> = ({ tasks, users, teams, alertPeriods, 
             const dayTasks = getTasksForDay(day);
             const isCurrentMonth = isSameMonth(day, currentDate);
             const isDayToday = isToday(day);
-            const alert = getAlertForDay(day);
-            const alertStyles = alert ? ALERT_COLOR_MAP[alert.color] : null;
+            const dayAlerts = getAlertsForDay(day);
             
             return (
               <div 
                 key={day.toISOString()} 
+                onClick={() => setExpandedDay(day)}
                 className={`
-                  relative flex flex-col p-2 group transition-colors min-h-[140px]
+                  relative flex flex-col p-1 transition-colors min-h-[140px] cursor-pointer hover:bg-slate-50
                   ${!isCurrentMonth ? 'bg-slate-50/50' : 'bg-white'}
-                  ${alertStyles ? alertStyles.bg + ' bg-opacity-30' : ''}
                 `}
               >
-                {/* Alert Background Label */}
-                {alertStyles && (
-                   <div className={`absolute top-0 left-0 w-full h-1 ${alertStyles.bg.replace('50', '400')}`}></div>
-                )}
+                {/* Multi-Alert Stack Header */}
+                <div className="flex flex-col gap-[2px] w-full mb-1">
+                    {dayAlerts.map(alert => (
+                        <div key={alert.id} className={`h-1.5 w-full rounded-full ${ALERT_COLOR_MAP[alert.color].bar}`} title={alert.label}></div>
+                    ))}
+                </div>
 
                 {/* Day Number */}
-                <div className="flex justify-between items-start mb-1">
+                <div className="flex justify-between items-center px-1">
                   <span className={`
-                    text-sm font-medium w-7 h-7 flex items-center justify-center rounded-full z-10
+                    text-sm font-medium w-6 h-6 flex items-center justify-center rounded-full
                     ${isDayToday 
                       ? 'bg-indigo-600 text-white' 
                       : isCurrentMonth ? 'text-slate-700' : 'text-slate-400'}
                   `}>
                     {format(day, 'd')}
                   </span>
-
-                   {/* Alert Icon */}
-                   {alert && alertStyles && (
-                     <div className="flex items-center gap-1 overflow-hidden">
-                       <span className={`text-[10px] font-bold uppercase tracking-tighter truncate ${alertStyles.text}`}>
-                         {alert.label}
-                       </span>
-                       <AlertTriangle size={12} className={alertStyles.icon} />
-                     </div>
-                   )}
-
-                  {/* Add Button */}
-                  <button 
-                    onClick={() => onAddTask(day)}
-                    className="opacity-0 group-hover:opacity-100 p-1 text-indigo-600 hover:bg-indigo-50 rounded transition-all"
-                    title="Nova Demanda"
-                  >
-                    <Plus size={16} />
-                  </button>
+                  
+                  {/* Alert Icons Mini */}
+                  {dayAlerts.length > 0 && (
+                      <div className="flex gap-0.5">
+                         {dayAlerts.slice(0, 3).map(alert => (
+                            <AlertTriangle key={alert.id} size={10} className={ALERT_COLOR_MAP[alert.color].icon} />
+                         ))}
+                      </div>
+                  )}
                 </div>
 
                 {/* Tasks List */}
-                <div className="flex flex-col gap-1 overflow-y-auto max-h-[120px] custom-scrollbar z-0">
-                  {dayTasks.map(task => {
+                <div className="flex flex-col gap-1 mt-1 overflow-hidden">
+                  {dayTasks.slice(0, 4).map(task => {
                     const assignee = users.find(u => u.id === task.assigneeId);
                     const assignedTeam = !assignee ? teams.find(t => t.id === task.assigneeId) : null;
                     
-                    let progressPercent = 0;
-                    if (assignedTeam) {
-                        const teamMembers = users.filter(u => u.teamId === assignedTeam.id);
-                        const doneCount = teamMembers.filter(u => task.teamProgress?.[u.id] === 'DONE').length;
-                        progressPercent = teamMembers.length > 0 ? Math.round((doneCount / teamMembers.length) * 100) : 0;
-                    }
-
                     return (
-                      <button
+                      <div
                         key={task.id}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          onEditTask(task);
-                        }}
                         className={`
-                          text-left text-[10px] p-1.5 rounded-md border shadow-sm transition-transform hover:scale-[1.02] relative overflow-hidden
-                          ${!assignedTeam ? STATUS_COLORS[task.status] : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'}
+                          text-left text-[9px] px-1 py-0.5 rounded border truncate relative
+                          ${!assignedTeam ? STATUS_COLORS[task.status] : 'bg-white border-slate-200 text-slate-700'}
                         `}
                       >
-                        {/* Team Progress Background */}
-                        {assignedTeam && (
-                           <div 
-                              className="absolute bottom-0 left-0 h-1 bg-indigo-500 transition-all duration-500" 
-                              style={{ width: `${progressPercent}%` }}
-                           ></div>
-                        )}
-
-                        <div className="flex justify-between items-center mb-0.5 opacity-75">
-                           <span>{task.startTime || '??:??'} - {task.endTime || '??:??'}</span>
-                        </div>
-                        <div className="font-semibold truncate leading-tight mb-0.5">{task.title}</div>
-                        <div className="flex items-center justify-between opacity-80">
-                          {assignee && (
-                            <div className="flex items-center gap-1">
-                               <img src={assignee.avatar} alt="" className="w-3 h-3 rounded-full" />
-                               <span className="truncate max-w-[40px]">{assignee.name.split(' ')[0]}</span>
-                            </div>
-                          )}
-                          {assignedTeam && (
-                            <div className="flex items-center gap-1 bg-slate-100 px-1 rounded z-10">
-                               <Users size={10} className="text-indigo-600" />
-                               <span className="font-bold tracking-tighter text-indigo-700">{progressPercent}%</span>
-                            </div>
-                          )}
-                        </div>
-                      </button>
+                         <span className="font-semibold">{task.startTime}</span> {task.title}
+                      </div>
                     );
                   })}
+                  {dayTasks.length > 4 && (
+                      <div className="text-[9px] text-slate-400 text-center font-medium">+ {dayTasks.length - 4} mais</div>
+                  )}
                 </div>
               </div>
             );
