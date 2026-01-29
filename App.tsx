@@ -13,7 +13,7 @@ import LoginScreen from './components/LoginScreen';
 import { User, Task, AlertPeriod, Team, Notification, TaskStatus } from './types';
 import { USERS, INITIAL_TASKS, INITIAL_TEAMS } from './constants';
 import { api, getApiUrl } from './services/api';
-import { Layout, CheckSquare, List, Calendar as CalendarIcon, Settings, PieChart, MapPin, AlertTriangle, Users, Database, Loader2, Filter, KeyRound, Bell, LogOut } from 'lucide-react';
+import { Layout, CheckSquare, List, Calendar as CalendarIcon, Settings, PieChart, MapPin, AlertTriangle, Users, Database, Loader2, Filter, KeyRound, Bell, LogOut, RefreshCw } from 'lucide-react';
 import { format, isValid } from 'date-fns';
 
 const App: React.FC = () => {
@@ -184,6 +184,8 @@ const App: React.FC = () => {
       return true;
     } catch (error) {
       console.error("Sync Error", error);
+      // Only set error if it wasn't already connected, or if we want to show a warning
+      // but lets be explicit
       setConnectionStatus('ERROR');
       setIsLoadingInitial(false);
       return false;
@@ -195,7 +197,7 @@ const App: React.FC = () => {
   // Initial Fetch on Mount
   useEffect(() => {
     fetchData();
-    // AUMENTADO PARA 60 SEGUNDOS (1 MIN) CONFORME SOLICITADO
+    // 60 seconds interval
     const intervalId = setInterval(fetchData, 60000); 
     return () => clearInterval(intervalId);
   }, []); 
@@ -508,19 +510,30 @@ const App: React.FC = () => {
         </nav>
 
         <div className="p-2 bg-slate-950">
-           <div className="w-full flex items-center justify-center lg:justify-start gap-3 p-3 rounded-lg hover:bg-slate-800 transition-colors group cursor-default">
-              <div className="relative">
+           <button 
+             onClick={() => fetchData()}
+             className="w-full flex items-center justify-center lg:justify-start gap-3 p-3 rounded-lg hover:bg-slate-800 transition-colors group cursor-pointer"
+             title={connectionStatus === 'ERROR' ? 'Clique para reconectar' : 'Clique para atualizar'}
+           >
+              <div className="relative shrink-0">
                  <Database size={20} className="text-slate-400 group-hover:text-white transition-colors" />
                  <div className={`absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full border-2 border-slate-900 ${
                     connectionStatus === 'CONNECTED' ? 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.6)]' : 
-                    connectionStatus === 'ERROR' ? 'bg-red-500' : 'bg-slate-600'
+                    connectionStatus === 'ERROR' ? 'bg-red-500 animate-pulse' : 'bg-slate-600'
                  }`}></div>
               </div>
-              <span className="hidden lg:inline text-sm font-medium text-slate-300 group-hover:text-white">
-                {connectionStatus === 'CONNECTED' ? 'Conectado' : 'Desconectado'}
-              </span>
-              {isSyncing && <Loader2 size={14} className="animate-spin ml-auto text-slate-500" />}
-           </div>
+              <div className="hidden lg:flex flex-col items-start min-w-0">
+                <span className={`text-sm font-medium truncate ${connectionStatus === 'ERROR' ? 'text-red-400' : 'text-slate-300'}`}>
+                  {connectionStatus === 'CONNECTED' ? 'Conectado' : 'Desconectado'}
+                </span>
+                {connectionStatus === 'ERROR' && <span className="text-[10px] text-slate-500">Clique p/ reconectar</span>}
+              </div>
+              {isSyncing ? (
+                 <Loader2 size={14} className="animate-spin ml-auto text-slate-500" />
+              ) : (
+                 <RefreshCw size={14} className={`ml-auto text-slate-500 opacity-0 group-hover:opacity-100 ${connectionStatus === 'ERROR' ? 'opacity-100 text-red-400' : ''}`} />
+              )}
+           </button>
         </div>
 
         <div className="relative border-t border-slate-800 bg-slate-950 p-2" ref={userSwitcherRef}>

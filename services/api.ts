@@ -3,10 +3,8 @@ import { Task, User, AlertPeriod, Team } from '../types';
 import { format } from 'date-fns';
 
 // --- CONFIGURAÇÃO DA API ---
-// A URL fornecida foi inserida diretamente aqui.
-const HARDCODED_API_URL = 'https://script.google.com/macros/s/AKfycbygXY4MhhZkQDs6cDr52C7sig-kRM9sgWmfSd6lklKuuE25VWrGgIX6azDyD2TmBpqPug/exec'; 
+const HARDCODED_API_URL = 'https://script.google.com/macros/s/AKfycbzYNu9yGIZaha7vZZaiH8cvf7wImihkzTRFpCuq51ahmA3YGZ-pCsEF5WinABa_F2uxSg/exec'; 
 
-// Fallback para localStorage caso queira manter compatibilidade, mas prioriza a hardcoded
 let API_URL = HARDCODED_API_URL && HARDCODED_API_URL.startsWith('http') 
   ? HARDCODED_API_URL 
   : (localStorage.getItem('GESTOR_PRO_API_URL') || '');
@@ -27,31 +25,52 @@ const sendRequest = async (action: string, data?: any) => {
      throw new Error('API URL not configured');
   }
 
+  // Cache busting param to prevent browser from serving stale "disconnected" responses
+  const cacheBuster = `&_t=${new Date().getTime()}`;
+  const url = `${API_URL}?action=${action}${cacheBuster}`;
+
   try {
     let response;
     
+    // Configuração para CORS e evitar cache
+    const requestOptions: RequestInit = {
+       cache: 'no-store',
+       headers: {
+          'Content-Type': 'text/plain;charset=utf-8',
+       }
+    };
+
     if (action === 'read') {
-      response = await fetch(`${API_URL}?action=read`);
+      response = await fetch(`${API_URL}?action=read${cacheBuster}`, {
+         ...requestOptions,
+         method: 'GET'
+      });
     } else {
-      response = await fetch(`${API_URL}?action=${action}`, {
+      response = await fetch(`${API_URL}?action=${action}${cacheBuster}`, {
+        ...requestOptions,
         method: 'POST',
         body: JSON.stringify(data),
-        headers: { 'Content-Type': 'text/plain' } 
       });
+    }
+
+    if (!response.ok) {
+       throw new Error(`HTTP Error: ${response.status}`);
     }
 
     const text = await response.text();
     
-    // Try parsing JSON
     try {
       const json = JSON.parse(text);
       if (json.error) {
+        // If server is busy (lock timeout), we throw specific error to maybe retry
+        if (json.error.includes("Server busy")) throw new Error("BUSY");
         throw new Error("Server Error: " + json.error);
       }
       return json;
-    } catch (e) {
+    } catch (e: any) {
+      if (e.message === "BUSY") throw e;
       console.error("API Error (Raw Response):", text);
-      throw new Error("Falha na comunicação com o Google Sheets. Verifique o console ou a URL da API.");
+      throw new Error("Falha na estrutura de dados do servidor.");
     }
 
   } catch (error) {
@@ -69,7 +88,6 @@ export const api = {
     return sendRequest('saveTask', {
       ...task,
       date: format(task.date, 'yyyy-MM-dd'),
-      // IMPORTANT: Convert object to string for storage in Google Sheets cell
       teamProgress: JSON.stringify(task.teamProgress || {})
     });
   },
