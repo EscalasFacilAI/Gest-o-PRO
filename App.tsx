@@ -119,12 +119,19 @@ const App: React.FC = () => {
           return strVal;
         };
 
+        // Handle teamProgress JSON string if it comes from stringified source
+        let tp = t.teamProgress;
+        if (typeof tp === 'string') {
+          try { tp = JSON.parse(tp); } catch(e) { tp = {}; }
+        }
+
         return { 
           ...t, 
           title: t.title || 'Sem título', 
           date: dateObj,
           startTime: cleanTime(t.startTime),
-          endTime: cleanTime(t.endTime)
+          endTime: cleanTime(t.endTime),
+          teamProgress: tp || {}
         };
       });
 
@@ -188,7 +195,8 @@ const App: React.FC = () => {
   // Initial Fetch on Mount
   useEffect(() => {
     fetchData();
-    const intervalId = setInterval(fetchData, 5000);
+    // AUMENTADO PARA 60 SEGUNDOS (1 MIN) CONFORME SOLICITADO
+    const intervalId = setInterval(fetchData, 60000); 
     return () => clearInterval(intervalId);
   }, []); 
 
@@ -203,11 +211,14 @@ const App: React.FC = () => {
          currentTasks.forEach(task => {
              if (task.isNudged) {
                  const notifId = `${task.id}_nudge`;
-                 if (task.assigneeId === myId && !readIds.includes(notifId) && !currentIds.has(notifId)) {
+                 // Logic updated: If it's a team task, verify if *I* am responsible
+                 const isMyResponsibility = task.assigneeId === myId || (teams.some(t => t.id === task.assigneeId) && currentUserRef.current.teamId === task.assigneeId);
+
+                 if (isMyResponsibility && !readIds.includes(notifId) && !currentIds.has(notifId)) {
                      const title = task.title && task.title.trim() !== '' ? task.title : 'Tarefa sem título';
                      incomingNotifications.push({
                         id: notifId,
-                        targetUserId: task.assigneeId,
+                        targetUserId: myId,
                         message: `⚠️ URGENTE: A demanda "${title}" foi cobrada!`,
                         date: new Date(),
                         read: false,
@@ -221,20 +232,27 @@ const App: React.FC = () => {
          if (!isFirstLoadRef.current && tasksRef.current.length > 0) {
             currentTasks.forEach(newTask => {
                 const oldTask = tasksRef.current.find(t => t.id === newTask.id);
-                if ((!oldTask || oldTask.assigneeId !== newTask.assigneeId) && newTask.assigneeId === myId) {
-                    const notifId = `assign_${newTask.id}_${newTask.assigneeId}`;
-                     if (!currentIds.has(notifId) && !readIds.includes(notifId)) {
-                        const title = newTask.title && newTask.title.trim() !== '' ? newTask.title : 'Tarefa sem título';
-                        incomingNotifications.push({ 
-                            id: notifId, 
-                            targetUserId: newTask.assigneeId,
-                            message: `Nova demanda atribuída: ${title}`, 
-                            date: new Date(), 
-                            read: false, 
-                            type: 'TASK_ASSIGNED' 
-                        });
-                        currentIds.add(notifId);
-                     }
+                // Notification for assignments
+                // Only notify if assignment CHANGED or it's new
+                if ((!oldTask || oldTask.assigneeId !== newTask.assigneeId)) {
+                   const isAssignedToMe = newTask.assigneeId === myId;
+                   const isAssignedToMyTeam = teams.some(t => t.id === newTask.assigneeId) && currentUserRef.current.teamId === newTask.assigneeId;
+
+                   if (isAssignedToMe || isAssignedToMyTeam) {
+                      const notifId = `assign_${newTask.id}_${newTask.assigneeId}`;
+                      if (!currentIds.has(notifId) && !readIds.includes(notifId)) {
+                          const title = newTask.title && newTask.title.trim() !== '' ? newTask.title : 'Tarefa sem título';
+                          incomingNotifications.push({ 
+                              id: notifId, 
+                              targetUserId: myId,
+                              message: isAssignedToMyTeam ? `Nova demanda para equipe: ${title}` : `Nova demanda atribuída: ${title}`, 
+                              date: new Date(), 
+                              read: false, 
+                              type: 'TASK_ASSIGNED' 
+                          });
+                          currentIds.add(notifId);
+                      }
+                   }
                 }
             });
          }
@@ -263,12 +281,10 @@ const App: React.FC = () => {
 
   const handleLoginSuccess = async (updatedUser?: User) => {
      if (updatedUser) {
-        // First access or password change (user has new password)
         setTeamUsers(prev => prev.map(u => u.id === updatedUser.id ? updatedUser : u));
         setCurrentUser(updatedUser);
         if (getApiUrl()) await api.saveUser(updatedUser);
      } else if (authTargetUser) {
-        // Standard login (no user change)
         setCurrentUser(authTargetUser);
      }
      setIsAuthenticated(true);
@@ -302,9 +318,8 @@ const App: React.FC = () => {
         if (getApiUrl()) await api.saveUser(updatedUser);
         if (authMode === 'CHANGE_PASSWORD') alert("Senha alterada com sucesso!");
     } else if (authTargetUser) {
-       // Switching user inside app
        setCurrentUser(authTargetUser);
-       setIsAuthenticated(true); // Ensure stays true
+       setIsAuthenticated(true); 
     }
   };
 
@@ -314,7 +329,11 @@ const App: React.FC = () => {
   const handleEditTask = (task: Task) => { setSelectedTask(task); setSelectedDate(task.date); setIsModalOpen(true); };
   
   const handleSaveTask = async (taskToSave: Task) => {
-    const safeTask = { ...taskToSave, title: taskToSave.title || 'Sem título' };
+    const safeTask = { 
+       ...taskToSave, 
+       title: taskToSave.title || 'Sem título',
+       teamProgress: taskToSave.teamProgress || {} // Ensure property exists
+    };
     setTasks(prev => {
       const exists = prev.find(t => t.id === safeTask.id);
       return exists ? prev.map(t => t.id === safeTask.id ? safeTask : t) : [...prev, safeTask];
@@ -381,13 +400,31 @@ const App: React.FC = () => {
   const isCoordinator = currentUser.role === 'COORDINATOR';
 
   const displayedTasks = tasks.filter(task => {
-    const assignee = teamUsers.find(u => u.id === task.assigneeId);
-    if (!assignee) return false;
+    // Check if task is assigned to a User OR a Team
+    const assigneeUser = teamUsers.find(u => u.id === task.assigneeId);
+    const assigneeTeam = teams.find(t => t.id === task.assigneeId);
+    
     let passesScope = false;
-    if (filterScope === 'ME') passesScope = assignee.id === currentUser.id;
-    else if (filterScope === 'MY_TEAM') passesScope = assignee.teamId === currentUser.teamId;
-    else if (filterScope === 'ALL_TEAMS') passesScope = true;
-    else passesScope = assignee.teamId === filterScope;
+    
+    // Scope Logic
+    if (filterScope === 'ME') {
+        // Show if assigned to ME directly OR assigned to MY TEAM (Group Task)
+        passesScope = task.assigneeId === currentUser.id || task.assigneeId === currentUser.teamId;
+    }
+    else if (filterScope === 'MY_TEAM') {
+        // Show if assigned user belongs to my team OR assigned directly to my team
+        if (assigneeUser) passesScope = assigneeUser.teamId === currentUser.teamId;
+        else if (assigneeTeam) passesScope = assigneeTeam.id === currentUser.teamId;
+        else passesScope = false; 
+    }
+    else if (filterScope === 'ALL_TEAMS') {
+        passesScope = true;
+    }
+    else {
+        // Specific Team ID selected
+        if (assigneeUser) passesScope = assigneeUser.teamId === filterScope;
+        else if (assigneeTeam) passesScope = assigneeTeam.id === filterScope;
+    }
 
     if (!passesScope) return false;
     if (viewMode === 'LIST' && filterStatus !== 'ALL') if (task.status !== filterStatus) return false;
@@ -404,7 +441,6 @@ const App: React.FC = () => {
 
   // --- RENDER ---
 
-  // 1. If not authenticated, show Login Screen (after initial data load)
   if (!isAuthenticated) {
      return (
        <>
@@ -425,7 +461,6 @@ const App: React.FC = () => {
      );
   }
 
-  // 2. Main App
   return (
     <div className="flex h-screen bg-slate-50 text-slate-900 font-sans overflow-hidden">
       
@@ -642,6 +677,7 @@ const App: React.FC = () => {
               <Calendar 
                 tasks={displayedTasks} 
                 users={teamUsers}
+                teams={teams}
                 alertPeriods={displayedAlerts}
                 currentUser={currentUser}
                 onAddTask={handleAddTask}
@@ -651,6 +687,8 @@ const App: React.FC = () => {
               <TaskListView 
                 tasks={displayedTasks}
                 currentUser={currentUser}
+                users={teamUsers}
+                teams={teams}
                 onEditTask={handleEditTask}
               />
             ) : (

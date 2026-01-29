@@ -36,6 +36,7 @@ export interface Task {
   status: TaskStatus;
   priority: Priority;
   isNudged?: boolean; // If true, it was "Cobrada"
+  teamProgress?: Record<string, TaskStatus>; // Map userId -> status for team tasks
 }
 
 export interface AlertPeriod {

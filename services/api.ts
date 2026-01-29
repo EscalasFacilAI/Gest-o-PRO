@@ -4,7 +4,7 @@ import { format } from 'date-fns';
 
 // --- CONFIGURAÇÃO DA API ---
 // A URL fornecida foi inserida diretamente aqui.
-const HARDCODED_API_URL = 'https://script.google.com/macros/s/AKfycbxdzY6H-S4K9F7Fz8XeoEY9Jm7tcgSP7dFkGjIjOkbCImfDrpzColSHWCR577s6zz1jfA/exec'; 
+const HARDCODED_API_URL = 'https://script.google.com/macros/s/AKfycbygXY4MhhZkQDs6cDr52C7sig-kRM9sgWmfSd6lklKuuE25VWrGgIX6azDyD2TmBpqPug/exec'; 
 
 // Fallback para localStorage caso queira manter compatibilidade, mas prioriza a hardcoded
 let API_URL = HARDCODED_API_URL && HARDCODED_API_URL.startsWith('http') 
@@ -69,6 +69,8 @@ export const api = {
     return sendRequest('saveTask', {
       ...task,
       date: format(task.date, 'yyyy-MM-dd'),
+      // IMPORTANT: Convert object to string for storage in Google Sheets cell
+      teamProgress: JSON.stringify(task.teamProgress || {})
     });
   },
 

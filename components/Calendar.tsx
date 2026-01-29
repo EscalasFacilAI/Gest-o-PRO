@@ -6,20 +6,21 @@ import {
   format, isToday, isWithinInterval 
 } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
-import { ChevronLeft, ChevronRight, Plus, AlertTriangle } from 'lucide-react';
-import { Task, User, normalizeDate, AlertPeriod, ALERT_COLOR_MAP } from '../types';
+import { ChevronLeft, ChevronRight, Plus, AlertTriangle, Users } from 'lucide-react';
+import { Task, User, normalizeDate, AlertPeriod, ALERT_COLOR_MAP, Team } from '../types';
 import { STATUS_COLORS } from '../constants';
 
 interface CalendarProps {
   tasks: Task[];
   users: User[];
+  teams: Team[];
   alertPeriods: AlertPeriod[];
   currentUser: User;
   onAddTask: (date: Date) => void;
   onEditTask: (task: Task) => void;
 }
 
-const Calendar: React.FC<CalendarProps> = ({ tasks, users, alertPeriods, currentUser, onAddTask, onEditTask }) => {
+const Calendar: React.FC<CalendarProps> = ({ tasks, users, teams, alertPeriods, currentUser, onAddTask, onEditTask }) => {
   const [currentDate, setCurrentDate] = useState(new Date());
 
   const firstDayOfMonth = startOfMonth(currentDate);
@@ -143,7 +144,15 @@ const Calendar: React.FC<CalendarProps> = ({ tasks, users, alertPeriods, current
                 <div className="flex flex-col gap-1 overflow-y-auto max-h-[120px] custom-scrollbar z-0">
                   {dayTasks.map(task => {
                     const assignee = users.find(u => u.id === task.assigneeId);
+                    const assignedTeam = !assignee ? teams.find(t => t.id === task.assigneeId) : null;
                     
+                    let progressPercent = 0;
+                    if (assignedTeam) {
+                        const teamMembers = users.filter(u => u.teamId === assignedTeam.id);
+                        const doneCount = teamMembers.filter(u => task.teamProgress?.[u.id] === 'DONE').length;
+                        progressPercent = teamMembers.length > 0 ? Math.round((doneCount / teamMembers.length) * 100) : 0;
+                    }
+
                     return (
                       <button
                         key={task.id}
@@ -152,10 +161,18 @@ const Calendar: React.FC<CalendarProps> = ({ tasks, users, alertPeriods, current
                           onEditTask(task);
                         }}
                         className={`
-                          text-left text-[10px] p-1.5 rounded-md border shadow-sm transition-transform hover:scale-[1.02]
-                          ${STATUS_COLORS[task.status]}
+                          text-left text-[10px] p-1.5 rounded-md border shadow-sm transition-transform hover:scale-[1.02] relative overflow-hidden
+                          ${!assignedTeam ? STATUS_COLORS[task.status] : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'}
                         `}
                       >
+                        {/* Team Progress Background */}
+                        {assignedTeam && (
+                           <div 
+                              className="absolute bottom-0 left-0 h-1 bg-indigo-500 transition-all duration-500" 
+                              style={{ width: `${progressPercent}%` }}
+                           ></div>
+                        )}
+
                         <div className="flex justify-between items-center mb-0.5 opacity-75">
                            <span>{task.startTime || '??:??'} - {task.endTime || '??:??'}</span>
                         </div>
@@ -165,6 +182,12 @@ const Calendar: React.FC<CalendarProps> = ({ tasks, users, alertPeriods, current
                             <div className="flex items-center gap-1">
                                <img src={assignee.avatar} alt="" className="w-3 h-3 rounded-full" />
                                <span className="truncate max-w-[40px]">{assignee.name.split(' ')[0]}</span>
+                            </div>
+                          )}
+                          {assignedTeam && (
+                            <div className="flex items-center gap-1 bg-slate-100 px-1 rounded z-10">
+                               <Users size={10} className="text-indigo-600" />
+                               <span className="font-bold tracking-tighter text-indigo-700">{progressPercent}%</span>
                             </div>
                           )}
                         </div>
