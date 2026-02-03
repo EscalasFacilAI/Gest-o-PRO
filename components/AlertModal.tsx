@@ -23,6 +23,11 @@ const AlertModal: React.FC<AlertModalProps> = ({ isOpen, onClose, onSave, onDele
 
   if (!isOpen) return null;
 
+  // 2. Filter alerts: Only show active or future alerts (End date >= today)
+  // We use normalizeDate to ignore time components.
+  const today = normalizeDate(new Date());
+  const activeAlerts = alertPeriods.filter(a => normalizeDate(a.endDate) >= today);
+
   const handleEdit = (alert: AlertPeriod) => {
      setEditingId(alert.id);
      setLabel(alert.label);
@@ -57,16 +62,8 @@ const AlertModal: React.FC<AlertModalProps> = ({ isOpen, onClose, onSave, onDele
     };
     onSave(newAlert);
     
-    if (editingId) {
-       // Just reset editing state if editing, but keep modal open is usually better UX, 
-       // but here we align with closing to show full list or whatever parent does.
-       // Actually onSave usually closes modal in parent? 
-       // No, AlertModal onSave triggers parent handler, but parent might not close modal?
-       // Let's check App.tsx: onSave={handleSaveAlert} -> ... closes? No, handleSaveAlert just updates state.
-       // Wait, AlertModal calls onClose() right after onSave() in its own handleSave.
-    }
     resetForm();
-    onClose(); // Explicitly close modal on save
+    onClose(); 
   };
 
   return (
@@ -157,11 +154,11 @@ const AlertModal: React.FC<AlertModalProps> = ({ isOpen, onClose, onSave, onDele
              </div>
            </div>
            
-           {/* List Section */}
-           {alertPeriods.length > 0 && (
+           {/* List Section - Now only showing active alerts */}
+           {activeAlerts.length > 0 && (
               <div className="space-y-2">
                  <h3 className="text-sm font-bold text-slate-700 mt-2">Alertas Ativos</h3>
-                 {alertPeriods.map(alert => {
+                 {activeAlerts.map(alert => {
                    const styles = ALERT_COLOR_MAP[alert.color];
                    const isEditing = editingId === alert.id;
                    return (
@@ -206,6 +203,11 @@ const AlertModal: React.FC<AlertModalProps> = ({ isOpen, onClose, onSave, onDele
                      </div>
                    );
                  })}
+              </div>
+           )}
+           {activeAlerts.length === 0 && alertPeriods.length > 0 && (
+              <div className="text-center text-xs text-slate-400 py-4">
+                 Todos os alertas estão expirados.
               </div>
            )}
         </div>

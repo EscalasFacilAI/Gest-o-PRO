@@ -14,7 +14,7 @@ import NotesModal from './components/NotesModal';
 import { User, Task, AlertPeriod, Team, Notification, TaskStatus, Note } from './types';
 import { USERS, INITIAL_TASKS, INITIAL_TEAMS } from './constants';
 import { api, getApiUrl } from './services/api';
-import { Layout, CheckSquare, List, Calendar as CalendarIcon, Settings, PieChart, MapPin, AlertTriangle, Users, Database, Loader2, Filter, KeyRound, Bell, LogOut, RefreshCw, StickyNote } from 'lucide-react';
+import { Layout, CheckSquare, List, Calendar as CalendarIcon, Settings, PieChart, MapPin, AlertTriangle, Users, Database, Loader2, Filter, KeyRound, Bell, LogOut, RefreshCw, StickyNote, ChevronLeft, ChevronRight } from 'lucide-react';
 import { format, isValid } from 'date-fns';
 
 const App: React.FC = () => {
@@ -47,6 +47,9 @@ const App: React.FC = () => {
   const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
   const [isNotesOpen, setIsNotesOpen] = useState(false); // New Notes Modal
 
+  // User Switcher Local State
+  const [switcherTeamId, setSwitcherTeamId] = useState<string | null>(null);
+
   // Auth Modal State
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
   const [authTargetUser, setAuthTargetUser] = useState<User | null>(null);
@@ -71,6 +74,7 @@ const App: React.FC = () => {
     const handleClickOutside = (event: MouseEvent) => {
       if (userSwitcherRef.current && !userSwitcherRef.current.contains(event.target as Node)) {
         setIsUserSwitcherOpen(false);
+        setSwitcherTeamId(null); // Reset switcher state
       }
       if (notificationRef.current && !notificationRef.current.contains(event.target as Node)) {
         setIsNotificationsOpen(false);
@@ -292,6 +296,7 @@ const App: React.FC = () => {
     setIsAuthenticated(false);
     setViewMode('CALENDAR');
     setIsUserSwitcherOpen(false);
+    setSwitcherTeamId(null);
   };
 
   const handleUserSwitchClick = (user: User) => {
@@ -299,6 +304,7 @@ const App: React.FC = () => {
     setAuthMode('LOGIN');
     setIsAuthModalOpen(true);
     setIsUserSwitcherOpen(false); 
+    setSwitcherTeamId(null);
   };
 
   const handleChangePasswordClick = () => {
@@ -441,9 +447,23 @@ const App: React.FC = () => {
     return true;
   });
   
+  // 1. Alert Filter Logic Updated
   const displayedAlerts = alertPeriods.filter(alert => {
-     if (!alert.targetTeamId || alert.targetTeamId === 'ALL') return true;
-     return alert.targetTeamId === currentUser.teamId || isCoordinator;
+     // Base check: Is this alert meant for 'ALL' or the user's team, or is user a coordinator?
+     const isVisibleToUser = alert.targetTeamId === 'ALL' || alert.targetTeamId === currentUser.teamId || isCoordinator;
+     
+     if (!isVisibleToUser) return false;
+
+     // Coordinator Filter Logic: 
+     // If coordinator selects a specific team (filterScope is a Team ID), show only alerts for that team (or 'ALL')
+     if (isCoordinator) {
+        if (filterScope !== 'ALL_TEAMS' && filterScope !== 'MY_TEAM' && filterScope !== 'ME') {
+            // filterScope is a Team ID
+            return alert.targetTeamId === 'ALL' || alert.targetTeamId === filterScope;
+        }
+     }
+     
+     return true;
   });
 
   const myNotifications = notifications.filter(n => n.targetUserId === currentUser.id);
@@ -540,7 +560,10 @@ const App: React.FC = () => {
 
         <div className="relative border-t border-slate-800 bg-slate-950 p-2" ref={userSwitcherRef}>
            <button 
-             onClick={() => setIsUserSwitcherOpen(!isUserSwitcherOpen)}
+             onClick={() => {
+                setIsUserSwitcherOpen(!isUserSwitcherOpen);
+                setSwitcherTeamId(null);
+             }}
              className="w-full flex items-center justify-center lg:justify-start gap-3 p-2 rounded hover:bg-slate-800 transition-colors"
            >
               <div className="w-8 h-8 rounded-full bg-slate-700 flex items-center justify-center overflow-hidden">
@@ -552,18 +575,59 @@ const App: React.FC = () => {
            </button>
 
            {isUserSwitcherOpen && (
-              <div className="absolute bottom-full left-2 w-56 bg-slate-800 border border-slate-700 rounded-lg shadow-xl mb-2 p-1 z-50 max-h-60 overflow-y-auto">
-                 {teamUsers.map(u => (
-                   <button
-                     key={u.id}
-                     onClick={() => handleUserSwitchClick(u)}
-                     className={`w-full flex items-center gap-2 p-2 rounded text-sm ${currentUser.id === u.id ? 'bg-indigo-600 text-white' : 'text-slate-300 hover:bg-slate-700'}`}
-                   >
-                     <img src={u.avatar} className="w-6 h-6 rounded-full" alt=""/>
-                     <span className="truncate">{u.name}</span>
-                     {!u.password && <span className="ml-auto w-2 h-2 rounded-full bg-red-500" title="Sem senha"></span>}
-                   </button>
-                 ))}
+              <div className="absolute bottom-full left-2 w-64 bg-slate-800 border border-slate-700 rounded-lg shadow-xl mb-2 p-1 z-50 max-h-80 overflow-y-auto">
+                 
+                 {/* 4. User Switcher Logic: Show Teams First, then Users */}
+                 {!switcherTeamId ? (
+                     <>
+                        <div className="px-2 py-1 text-[10px] font-bold text-slate-500 uppercase">Selecione o Setor</div>
+                        <button 
+                             onClick={() => setSwitcherTeamId('ALL')}
+                             className="w-full text-left px-2 py-2 text-sm text-slate-300 hover:bg-slate-700 rounded flex justify-between"
+                        >
+                            <span>Todos os Setores</span>
+                            <ChevronRight size={14} />
+                        </button>
+                        {teams.map(team => (
+                             <button
+                                key={team.id}
+                                onClick={() => setSwitcherTeamId(team.id)}
+                                className="w-full text-left px-2 py-2 text-sm text-slate-300 hover:bg-slate-700 rounded flex justify-between"
+                             >
+                                 <span>{team.name}</span>
+                                 <ChevronRight size={14} />
+                             </button>
+                        ))}
+                     </>
+                 ) : (
+                     <>
+                        <div className="flex items-center gap-2 px-2 py-1 border-b border-slate-700 mb-1">
+                            <button onClick={() => setSwitcherTeamId(null)} className="text-slate-400 hover:text-white">
+                                <ChevronLeft size={16} />
+                            </button>
+                            <span className="text-xs font-bold text-slate-300">
+                                {switcherTeamId === 'ALL' ? 'Todos' : teams.find(t => t.id === switcherTeamId)?.name}
+                            </span>
+                        </div>
+                        {teamUsers
+                           .filter(u => switcherTeamId === 'ALL' || u.teamId === switcherTeamId)
+                           .map(u => (
+                            <button
+                                key={u.id}
+                                onClick={() => handleUserSwitchClick(u)}
+                                className={`w-full flex items-center gap-2 p-2 rounded text-sm ${currentUser.id === u.id ? 'bg-indigo-600 text-white' : 'text-slate-300 hover:bg-slate-700'}`}
+                            >
+                                <img src={u.avatar} className="w-6 h-6 rounded-full" alt=""/>
+                                <span className="truncate">{u.name}</span>
+                                {!u.password && <span className="ml-auto w-2 h-2 rounded-full bg-red-500" title="Sem senha"></span>}
+                            </button>
+                        ))}
+                        {teamUsers.filter(u => switcherTeamId === 'ALL' || u.teamId === switcherTeamId).length === 0 && (
+                            <div className="p-2 text-xs text-slate-500">Nenhum usuário.</div>
+                        )}
+                     </>
+                 )}
+
                  <div className="border-t border-slate-700 mt-1 pt-1">
                     <button onClick={handleLogout} className="w-full flex items-center gap-2 p-2 text-red-400 hover:bg-slate-700 rounded text-sm">
                         <LogOut size={14} /> Sair do Sistema

@@ -1,10 +1,10 @@
 
-import React from 'react';
+import React, { useState } from 'react';
 import { Task, User, Team, normalizeDate, TaskStatus } from '../types';
 import { STATUS_LABELS, STATUS_COLORS } from '../constants';
 import { format, isSameDay } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
-import { Clock, CheckCircle2, Users, PlayCircle, Circle } from 'lucide-react';
+import { Clock, CheckCircle2, Users, PlayCircle, Circle, Filter, X } from 'lucide-react';
 
 interface TaskListViewProps {
   tasks: Task[];
@@ -15,8 +15,24 @@ interface TaskListViewProps {
 }
 
 const TaskListView: React.FC<TaskListViewProps> = ({ tasks, currentUser, users, teams, onEditTask }) => {
+  // 5. Date Filter State
+  const [startDate, setStartDate] = useState('');
+  const [endDate, setEndDate] = useState('');
+
   // Sort tasks by date and then by start time
-  const sortedTasks = [...tasks].sort((a, b) => {
+  let filteredTasks = [...tasks];
+
+  // Apply Date Filter if set
+  if (startDate) {
+      const start = normalizeDate(new Date(startDate + 'T00:00:00'));
+      filteredTasks = filteredTasks.filter(t => normalizeDate(t.date) >= start);
+  }
+  if (endDate) {
+      const end = normalizeDate(new Date(endDate + 'T00:00:00'));
+      filteredTasks = filteredTasks.filter(t => normalizeDate(t.date) <= end);
+  }
+
+  const sortedTasks = filteredTasks.sort((a, b) => {
     const dateComp = a.date.getTime() - b.date.getTime();
     if (dateComp !== 0) return dateComp;
     return (a.startTime || '').localeCompare(b.startTime || '');
@@ -55,15 +71,52 @@ const TaskListView: React.FC<TaskListViewProps> = ({ tasks, currentUser, users, 
      }
   };
 
+  const clearFilters = () => {
+      setStartDate('');
+      setEndDate('');
+  };
+
   return (
-    <div className="bg-white rounded-2xl shadow-sm border border-slate-200 h-full overflow-y-auto custom-scrollbar p-6">
-      <h2 className="text-xl font-bold text-slate-800 mb-6 flex items-center gap-2">
-        <Clock className="text-indigo-600" /> Cronograma de Demandas
-      </h2>
+    <div className="bg-white rounded-2xl shadow-sm border border-slate-200 h-full overflow-y-auto custom-scrollbar p-6 flex flex-col">
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
+          <h2 className="text-xl font-bold text-slate-800 flex items-center gap-2">
+            <Clock className="text-indigo-600" /> Cronograma de Demandas
+          </h2>
+
+          <div className="flex items-center gap-2 bg-slate-50 p-2 rounded-lg border border-slate-200">
+             <div className="flex items-center gap-2">
+                <span className="text-xs font-bold text-slate-500 uppercase">De:</span>
+                <input 
+                   type="date" 
+                   value={startDate} 
+                   onChange={e => setStartDate(e.target.value)}
+                   className="text-sm border-slate-300 rounded px-2 py-1 bg-white focus:ring-1 focus:ring-indigo-500"
+                />
+             </div>
+             <div className="flex items-center gap-2">
+                <span className="text-xs font-bold text-slate-500 uppercase">Até:</span>
+                <input 
+                   type="date" 
+                   value={endDate} 
+                   onChange={e => setEndDate(e.target.value)}
+                   className="text-sm border-slate-300 rounded px-2 py-1 bg-white focus:ring-1 focus:ring-indigo-500"
+                />
+             </div>
+             {(startDate || endDate) && (
+                <button 
+                  onClick={clearFilters}
+                  className="p-1 hover:bg-slate-200 rounded text-slate-500"
+                  title="Limpar Filtro"
+                >
+                    <X size={16} />
+                </button>
+             )}
+          </div>
+      </div>
 
       {Object.keys(groupedTasks).length === 0 ? (
         <div className="text-center py-12 text-slate-400">
-          Nenhuma demanda encontrada.
+          Nenhuma demanda encontrada neste período.
         </div>
       ) : (
         <div className="space-y-8">

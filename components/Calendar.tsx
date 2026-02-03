@@ -6,7 +6,7 @@ import {
   format, isToday, isWithinInterval 
 } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
-import { ChevronLeft, ChevronRight, Plus, AlertTriangle, Users, X, Clock } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Plus, AlertTriangle, Users, X, Clock, Eye, EyeOff } from 'lucide-react';
 import { Task, User, normalizeDate, AlertPeriod, ALERT_COLOR_MAP, Team } from '../types';
 import { STATUS_COLORS, STATUS_LABELS } from '../constants';
 
@@ -23,6 +23,9 @@ interface CalendarProps {
 const Calendar: React.FC<CalendarProps> = ({ tasks, users, teams, alertPeriods, currentUser, onAddTask, onEditTask }) => {
   const [currentDate, setCurrentDate] = useState(new Date());
   const [expandedDay, setExpandedDay] = useState<Date | null>(null);
+  
+  // 6. Option to hide completed demands
+  const [showCompleted, setShowCompleted] = useState(true);
 
   const firstDayOfMonth = startOfMonth(currentDate);
   const lastDayOfMonth = endOfMonth(currentDate);
@@ -37,7 +40,12 @@ const Calendar: React.FC<CalendarProps> = ({ tasks, users, teams, alertPeriods, 
 
   const getTasksForDay = (date: Date) => {
     return tasks
-      .filter(task => isSameDay(normalizeDate(task.date), normalizeDate(date)))
+      .filter(task => {
+         const sameDay = isSameDay(normalizeDate(task.date), normalizeDate(date));
+         // Filter out done tasks if toggle is off
+         if (!showCompleted && task.status === 'DONE') return false;
+         return sameDay;
+      })
       .sort((a, b) => (a.startTime || '').localeCompare(b.startTime || ''));
   };
 
@@ -176,12 +184,23 @@ const Calendar: React.FC<CalendarProps> = ({ tasks, users, teams, alertPeriods, 
           </div>
         </div>
         
-        <button 
-          onClick={goToToday}
-          className="px-4 py-2 text-sm font-medium text-slate-700 bg-white border border-slate-200 hover:bg-slate-50 hover:border-slate-300 rounded-lg transition-colors"
-        >
-          Hoje
-        </button>
+        <div className="flex gap-2">
+            <button
+               onClick={() => setShowCompleted(!showCompleted)}
+               className={`flex items-center gap-2 px-3 py-2 text-sm font-medium border rounded-lg transition-colors ${showCompleted ? 'text-indigo-600 bg-indigo-50 border-indigo-200' : 'text-slate-500 bg-white border-slate-200'}`}
+               title={showCompleted ? "Ocultar Concluídas" : "Mostrar Concluídas"}
+            >
+               {showCompleted ? <Eye size={18} /> : <EyeOff size={18} />}
+               <span className="hidden sm:inline">{showCompleted ? 'Ocultar Concluídas' : 'Mostrar Concluídas'}</span>
+            </button>
+
+            <button 
+                onClick={goToToday}
+                className="px-4 py-2 text-sm font-medium text-slate-700 bg-white border border-slate-200 hover:bg-slate-50 hover:border-slate-300 rounded-lg transition-colors"
+            >
+                Hoje
+            </button>
+        </div>
       </div>
 
       {/* Days of Week Header */}
@@ -211,32 +230,35 @@ const Calendar: React.FC<CalendarProps> = ({ tasks, users, teams, alertPeriods, 
                   ${!isCurrentMonth ? 'bg-slate-50/50' : 'bg-white'}
                 `}
               >
-                {/* Multi-Alert Stack Header */}
-                <div className="flex flex-col gap-[2px] w-full mb-1">
-                    {dayAlerts.map(alert => (
-                        <div key={alert.id} className={`h-1.5 w-full rounded-full ${ALERT_COLOR_MAP[alert.color].bar}`} title={alert.label}></div>
-                    ))}
-                </div>
-
-                {/* Day Number */}
-                <div className="flex justify-between items-center px-1">
+                {/* Header Row: Day Number + Alerts next to it */}
+                <div className="flex justify-between items-start px-1 pt-1 mb-1 gap-1">
+                  
+                  {/* Day Number */}
                   <span className={`
-                    text-sm font-medium w-6 h-6 flex items-center justify-center rounded-full
+                    text-sm font-medium w-6 h-6 flex items-center justify-center rounded-full shrink-0
                     ${isDayToday 
                       ? 'bg-indigo-600 text-white' 
                       : isCurrentMonth ? 'text-slate-700' : 'text-slate-400'}
                   `}>
                     {format(day, 'd')}
                   </span>
-                  
-                  {/* Alert Icons Mini */}
-                  {dayAlerts.length > 0 && (
-                      <div className="flex gap-0.5">
-                         {dayAlerts.slice(0, 3).map(alert => (
-                            <AlertTriangle key={alert.id} size={10} className={ALERT_COLOR_MAP[alert.color].icon} />
-                         ))}
-                      </div>
-                  )}
+
+                  {/* Alerts Container (Next to Number) */}
+                  <div className="flex flex-col gap-0.5 items-end flex-1 min-w-0 max-w-[80%]">
+                      {dayAlerts.map(alert => (
+                          <div 
+                              key={alert.id} 
+                              className={`
+                                  w-full text-right ${ALERT_COLOR_MAP[alert.color].bg} ${ALERT_COLOR_MAP[alert.color].text} 
+                                  border ${ALERT_COLOR_MAP[alert.color].border}
+                                  text-[9px] font-bold px-1.5 py-0.5 rounded-md truncate
+                              `}
+                              title={alert.label}
+                          >
+                              {alert.label}
+                          </div>
+                      ))}
+                  </div>
                 </div>
 
                 {/* Tasks List */}
