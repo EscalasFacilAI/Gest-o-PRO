@@ -37,6 +37,8 @@ export interface Task {
   description: string;
   assigneeId: string;
   targetTeamId?: string; // Optional: If specific to a team context
+  creatorId: string; // ID of the user who created the task
+  isPrivate?: boolean; // If true, only visible to creator
   date: Date; // Normalized to midnight
   startTime?: string; // Format "HH:mm"
   endTime?: string;   // Format "HH:mm"

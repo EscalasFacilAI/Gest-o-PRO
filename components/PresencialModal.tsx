@@ -21,12 +21,15 @@ const PresencialModal: React.FC<PresencialModalProps> = ({ isOpen, onClose, user
   const [hasChanges, setHasChanges] = useState(false);
   const [filterTeamId, setFilterTeamId] = useState<string>('MY_TEAM');
 
+  const [expandedDayStr, setExpandedDayStr] = useState<string | null>(null);
+
   useEffect(() => {
     if (isOpen) {
       setLocalUsers(users); // Initialize local state with current props
       setHasChanges(false);
       setCurrentDate(new Date());
       setFilterTeamId(currentUser.role === 'COORDINATOR' ? 'ALL' : currentUser.teamId);
+      setExpandedDayStr(null);
     }
   }, [isOpen, users, currentUser]);
 
@@ -59,7 +62,8 @@ const PresencialModal: React.FC<PresencialModalProps> = ({ isOpen, onClose, user
     await onSavePresence(localUsers);
     setIsSaving(false);
     setHasChanges(false);
-    onClose();
+    // Do not close modal
+    alert("Alterações salvas com sucesso!");
   };
 
   // Filter Logic
@@ -128,43 +132,56 @@ const PresencialModal: React.FC<PresencialModalProps> = ({ isOpen, onClose, user
               {days.map(day => {
                 const dateStr = format(day, 'yyyy-MM-dd');
                 const isTodayStr = isSameDay(day, new Date());
+                const isExpanded = expandedDayStr === dateStr;
+                const presentCount = filteredUsers.filter(u => u.presencialDates.includes(dateStr)).length;
 
                 return (
-                  <div key={dateStr} className={`flex flex-col gap-3 p-4 border rounded-xl bg-white shadow-sm ${isTodayStr ? 'border-indigo-400 ring-1 ring-indigo-200' : 'border-slate-200'}`}>
-                     <div className="flex items-center justify-between border-b border-slate-100 pb-2 mb-1">
+                  <div key={dateStr} className={`flex flex-col gap-3 p-4 border rounded-xl bg-white shadow-sm transition-all ${isTodayStr ? 'border-indigo-400 ring-1 ring-indigo-200' : 'border-slate-200'}`}>
+                     <div 
+                        className="flex items-center justify-between border-b border-slate-100 pb-2 mb-1 cursor-pointer hover:bg-slate-50 rounded px-1"
+                        onClick={() => setExpandedDayStr(isExpanded ? null : dateStr)}
+                     >
                         <div className="flex items-baseline gap-1">
                            <span className="text-xl font-bold text-slate-800">{format(day, 'd')}</span>
                            <span className="text-xs uppercase font-bold text-slate-500">{format(day, 'EEE', { locale: ptBR })}</span>
                         </div>
-                        {isTodayStr && <span className="text-[10px] font-bold bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded-full">HOJE</span>}
+                        <div className="flex items-center gap-2">
+                            <span className="text-xs font-bold text-green-600 bg-green-50 px-2 py-0.5 rounded-full border border-green-100">
+                                {presentCount} Presenciais
+                            </span>
+                            {isTodayStr && <span className="text-[10px] font-bold bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded-full">HOJE</span>}
+                            <ChevronRight size={16} className={`text-slate-400 transition-transform ${isExpanded ? 'rotate-90' : ''}`} />
+                        </div>
                      </div>
                      
-                     <div className="space-y-2">
-                        {filteredUsers.length === 0 && <div className="text-xs text-slate-400 italic text-center">Ninguém nesta equipe.</div>}
-                        {filteredUsers.map(u => {
-                           const isPresent = u.presencialDates.includes(dateStr);
-                           return (
-                             <button 
-                               key={u.id} 
-                               onClick={() => handleToggleLocal(u.id, dateStr)}
-                               className={`
-                                 w-full flex items-center justify-between p-1.5 rounded-lg border transition-all
-                                 ${isPresent 
+                     {isExpanded && (
+                        <div className="space-y-2 animate-in slide-in-from-top-2 duration-200">
+                            {filteredUsers.length === 0 && <div className="text-xs text-slate-400 italic text-center">Ninguém nesta equipe.</div>}
+                            {filteredUsers.map(u => {
+                            const isPresent = u.presencialDates.includes(dateStr);
+                            return (
+                                <button 
+                                key={u.id} 
+                                onClick={() => handleToggleLocal(u.id, dateStr)}
+                                className={`
+                                    w-full flex items-center justify-between p-1.5 rounded-lg border transition-all
+                                    ${isPresent 
                                     ? 'bg-green-50 border-green-200 hover:bg-green-100' 
                                     : 'bg-slate-50 border-slate-200 hover:bg-slate-100 opacity-60 hover:opacity-100'}
-                               `}
-                             >
-                                <div className="flex items-center gap-2">
-                                   <img src={u.avatar} className="w-6 h-6 rounded-full" alt=""/>
-                                   <span className={`text-xs font-semibold ${isPresent ? 'text-green-800' : 'text-slate-500'}`}>
-                                     {u.name.split(' ')[0]}
-                                   </span>
-                                </div>
-                                <div className={`w-2 h-2 rounded-full ${isPresent ? 'bg-green-500' : 'bg-slate-300'}`}></div>
-                             </button>
-                           )
-                        })}
-                     </div>
+                                `}
+                                >
+                                    <div className="flex items-center gap-2">
+                                    <img src={u.avatar} className="w-6 h-6 rounded-full" alt=""/>
+                                    <span className={`text-xs font-semibold ${isPresent ? 'text-green-800' : 'text-slate-500'}`}>
+                                        {u.name.split(' ')[0]}
+                                    </span>
+                                    </div>
+                                    <div className={`w-2 h-2 rounded-full ${isPresent ? 'bg-green-500' : 'bg-slate-300'}`}></div>
+                                </button>
+                            )
+                            })}
+                        </div>
+                     )}
                   </div>
                 )
               })}

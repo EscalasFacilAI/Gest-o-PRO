@@ -1,9 +1,9 @@
 
 import React, { useState, useEffect } from 'react';
-import { X, Calendar as CalendarIcon, User as UserIcon, Flag, CheckCircle2, Clock, AlertCircle, Megaphone, ListChecks, Repeat, ArrowRight } from 'lucide-react';
+import { X, Calendar as CalendarIcon, User as UserIcon, Flag, CheckCircle2, Clock, AlertCircle, Megaphone, ListChecks, Repeat, ArrowRight, Lock, Unlock } from 'lucide-react';
 import { Task, User, Team, TaskStatus, Priority, normalizeDate } from '../types';
 import { STATUS_LABELS } from '../constants';
-import { format, addDays, addWeeks, addMonths } from 'date-fns';
+import { format, addDays, addWeeks, addMonths, isWeekend } from 'date-fns';
 
 interface TaskModalProps {
   isOpen: boolean;
@@ -41,6 +41,7 @@ const TaskModal: React.FC<TaskModalProps> = ({
   const [isNudged, setIsNudged] = useState(false);
   const [pendingNudge, setPendingNudge] = useState(false);
   const [teamProgress, setTeamProgress] = useState<Record<string, TaskStatus>>({});
+  const [isPrivate, setIsPrivate] = useState(false);
   
   // Recurrence State
   const [recurrenceType, setRecurrenceType] = useState<'NONE' | 'DAILY' | 'WEEKLY' | 'MONTHLY'>('NONE');
@@ -64,6 +65,7 @@ const TaskModal: React.FC<TaskModalProps> = ({
         setTargetTeamId(initialTask.targetTeamId || '');
         setIsNudged(initialTask.isNudged || false);
         setTeamProgress(initialTask.teamProgress || {});
+        setIsPrivate(initialTask.isPrivate || false);
 
         if (!initialTask.targetTeamId) {
             const assignee = users.find(u => u.id === initialTask.assigneeId);
@@ -84,6 +86,7 @@ const TaskModal: React.FC<TaskModalProps> = ({
         setEndTime('09:00');
         setIsNudged(false);
         setTeamProgress({});
+        setIsPrivate(false);
       }
     }
   }, [isOpen, initialTask, selectedDate, currentUser, users, teams]);
@@ -97,6 +100,7 @@ const TaskModal: React.FC<TaskModalProps> = ({
       title,
       description,
       assigneeId,
+      creatorId: initialTask?.creatorId || currentUser.id,
       targetTeamId,
       priority,
       status,
@@ -104,7 +108,8 @@ const TaskModal: React.FC<TaskModalProps> = ({
       startTime,
       endTime,
       isNudged,
-      teamProgress
+      teamProgress,
+      isPrivate
     };
   };
 
@@ -134,7 +139,18 @@ const TaskModal: React.FC<TaskModalProps> = ({
        let safeguard = 0;
        
        while (currentDateCursor <= endDateObj && safeguard < 366) {
-           tasksToCreate.push(buildTaskObject(crypto.randomUUID(), new Date(currentDateCursor)));
+           let shouldCreate = true;
+
+           if (recurrenceType === 'DAILY') {
+               // Skip weekends for daily tasks
+               if (isWeekend(currentDateCursor)) {
+                   shouldCreate = false;
+               }
+           }
+
+           if (shouldCreate) {
+               tasksToCreate.push(buildTaskObject(crypto.randomUUID(), new Date(currentDateCursor)));
+           }
            
            if (recurrenceType === 'DAILY') {
                currentDateCursor = addDays(currentDateCursor, 1);
@@ -170,8 +186,26 @@ const TaskModal: React.FC<TaskModalProps> = ({
     }
   };
 
-  const handleToggleMyTeamStatus = (status: TaskStatus) => {
-    setTeamProgress(prev => ({ ...prev, [currentUser.id]: status }));
+  const handleToggleMyTeamStatus = (newStatus: TaskStatus) => {
+    const updatedProgress = { ...teamProgress, [currentUser.id]: newStatus };
+    setTeamProgress(updatedProgress);
+
+    // Check if all team members are DONE
+    const teamMembers = users.filter(u => u.teamId === assigneeId);
+    const allDone = teamMembers.every(member => {
+        const s = member.id === currentUser.id ? newStatus : (updatedProgress[member.id] || 'TODO');
+        return s === 'DONE';
+    });
+
+    if (allDone) {
+        setStatus('DONE');
+    } else if (status === 'DONE' && !allDone) {
+        // If it was DONE but someone reverted, maybe go back to IN_PROGRESS?
+        // For now, let's just ensure it goes to DONE if 100%.
+        setStatus('IN_PROGRESS');
+    } else if (newStatus !== 'TODO' && status === 'TODO') {
+        setStatus('IN_PROGRESS');
+    }
   };
 
   const isLeader = currentUser.role === 'LEADER';
@@ -199,9 +233,21 @@ const TaskModal: React.FC<TaskModalProps> = ({
             {initialTask ? 'Detalhes da Demanda' : 'Nova Demanda'}
             {isNudged && <span className="bg-red-100 text-red-600 text-[10px] px-2 py-0.5 rounded-full border border-red-200 animate-pulse">URGENTE / COBRADO</span>}
           </h2>
-          <button onClick={onClose} className="text-slate-400 hover:text-slate-600 transition-colors">
-            <X size={20} />
-          </button>
+          <div className="flex items-center gap-2">
+             {/* Private Toggle */}
+             {canEditDetails && (
+                 <button 
+                   onClick={() => setIsPrivate(!isPrivate)}
+                   className={`p-1.5 rounded-lg transition-colors ${isPrivate ? 'bg-amber-100 text-amber-700' : 'bg-slate-100 text-slate-400 hover:bg-slate-200'}`}
+                   title={isPrivate ? "Privado (Visível apenas para você)" : "Público (Visível para equipe)"}
+                 >
+                    {isPrivate ? <Lock size={18} /> : <Unlock size={18} />}
+                 </button>
+             )}
+             <button onClick={onClose} className="text-slate-400 hover:text-slate-600 transition-colors">
+                <X size={20} />
+             </button>
+          </div>
         </div>
 
         {/* Body */}

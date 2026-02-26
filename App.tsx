@@ -443,6 +443,10 @@ const App: React.FC = () => {
     }
 
     if (!passesScope) return false;
+    
+    // Private Task Filter
+    if (task.isPrivate && task.creatorId !== currentUser.id) return false;
+
     if (viewMode === 'LIST' && filterStatus !== 'ALL') if (task.status !== filterStatus) return false;
     return true;
   });
@@ -498,7 +502,7 @@ const App: React.FC = () => {
         <nav className="flex-1 p-4 space-y-2 overflow-y-auto">
           <button onClick={() => setViewMode('CALENDAR')} className={`w-full px-3 py-3 rounded-lg flex items-center justify-center lg:justify-start gap-3 font-medium transition-colors ${viewMode === 'CALENDAR' ? 'bg-slate-800 text-white' : 'hover:bg-slate-800 text-slate-400'}`}>
             <CheckSquare size={20} />
-            <span className="hidden lg:inline">Minhas Demandas</span>
+            <span className="hidden lg:inline">Calendário de Demandas</span>
           </button>
 
           <button onClick={() => { setViewMode('DASHBOARD'); setFilterStatus('ALL'); }} className={`w-full px-3 py-3 rounded-lg flex items-center justify-center lg:justify-start gap-3 font-medium transition-colors ${viewMode === 'DASHBOARD' ? 'bg-slate-800 text-white' : 'hover:bg-slate-800 text-slate-400'}`}>

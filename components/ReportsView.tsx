@@ -4,7 +4,7 @@ import { Task, User } from '../types';
 import { STATUS_LABELS } from '../constants';
 import { format, isSameMonth, subMonths, addMonths } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
-import { ChevronLeft, ChevronRight, FileBarChart, PieChart, CheckCircle2, Clock, AlertCircle } from 'lucide-react';
+import { ChevronLeft, ChevronRight, FileBarChart, PieChart, CheckCircle2, Clock, AlertCircle, Download } from 'lucide-react';
 
 interface ReportsViewProps {
   tasks: Task[];
@@ -19,6 +19,34 @@ const ReportsView: React.FC<ReportsViewProps> = ({ tasks, users }) => {
 
   // Filter tasks for the selected month
   const monthlyTasks = tasks.filter(t => isSameMonth(t.date, currentMonth));
+
+  const downloadCSV = () => {
+    const headers = ['Atividade', 'Observação', 'Responsável', 'Dia', 'Início', 'Fim', 'Status'];
+    const rows = monthlyTasks.map(task => {
+        const assignee = users.find(u => u.id === task.assigneeId)?.name || 'Equipe/Outro';
+        const obs = (task.description || '').replace(/(\r\n|\n|\r)/gm, " "); // Sanitize newlines
+        const day = format(task.date, 'dd/MM/yyyy');
+        return [
+            `"${task.title.replace(/"/g, '""')}"`, // Escape quotes
+            `"${obs.replace(/"/g, '""')}"`,
+            `"${assignee}"`,
+            `"${day}"`,
+            `"${task.startTime || ''}"`,
+            `"${task.endTime || ''}"`,
+            `"${STATUS_LABELS[task.status]}"`
+        ].join(',');
+    });
+
+    const csvContent = "\uFEFF" + [headers.join(','), ...rows].join('\n'); // Add BOM for Excel
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.setAttribute('href', url);
+    link.setAttribute('download', `relatorio_${format(currentMonth, 'MM_yyyy')}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
 
   // 1. Overall Stats
   const totalTasks = monthlyTasks.length;
@@ -52,16 +80,25 @@ const ReportsView: React.FC<ReportsViewProps> = ({ tasks, users }) => {
              <FileBarChart className="text-indigo-600" /> Relatório Mensal
           </h2>
           
-          <div className="flex items-center bg-white border border-slate-200 rounded-lg p-1 shadow-sm">
-            <button onClick={handlePrevMonth} className="p-1 hover:bg-slate-100 rounded text-slate-600">
-               <ChevronLeft size={20} />
-            </button>
-            <span className="px-4 text-sm font-bold text-slate-700 min-w-[140px] text-center capitalize">
-               {format(currentMonth, 'MMMM yyyy', { locale: ptBR })}
-            </span>
-            <button onClick={handleNextMonth} className="p-1 hover:bg-slate-100 rounded text-slate-600">
-               <ChevronRight size={20} />
-            </button>
+          <div className="flex items-center gap-3">
+              <button 
+                onClick={downloadCSV}
+                className="flex items-center gap-2 px-3 py-1.5 bg-green-600 hover:bg-green-700 text-white rounded-lg text-sm font-medium transition-colors shadow-sm"
+              >
+                  <Download size={16} /> Exportar CSV
+              </button>
+
+              <div className="flex items-center bg-white border border-slate-200 rounded-lg p-1 shadow-sm">
+                <button onClick={handlePrevMonth} className="p-1 hover:bg-slate-100 rounded text-slate-600">
+                   <ChevronLeft size={20} />
+                </button>
+                <span className="px-4 text-sm font-bold text-slate-700 min-w-[140px] text-center capitalize">
+                   {format(currentMonth, 'MMMM yyyy', { locale: ptBR })}
+                </span>
+                <button onClick={handleNextMonth} className="p-1 hover:bg-slate-100 rounded text-slate-600">
+                   <ChevronRight size={20} />
+                </button>
+              </div>
           </div>
        </div>
 
