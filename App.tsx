@@ -752,6 +752,7 @@ const App: React.FC = () => {
               <DashboardView 
                 tasks={displayedTasks} 
                 users={teamUsers}
+                currentUser={currentUser}
                 onFilterRequest={(status) => {
                    setFilterStatus(status);
                    setViewMode('LIST');

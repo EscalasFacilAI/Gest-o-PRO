@@ -63,7 +63,7 @@ export interface Notification {
   message: string;
   date: Date;
   read: boolean;
-  type: 'TASK_ASSIGNED' | 'NUDGE';
+  type: 'TASK_ASSIGNED' | 'NUDGE' | 'LATE_TASK';
 }
 
 // Helper to keep dates consistent

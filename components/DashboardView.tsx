@@ -5,17 +5,28 @@ import { STATUS_LABELS } from '../constants';
 import { isSameDay, format, startOfMonth, endOfMonth, eachDayOfInterval, isSameMonth, subMonths, addMonths } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { PieChart, UserCheck, Home, ArrowRight, CalendarDays, FileDown, Activity, ChevronLeft, ChevronRight, CheckCircle2 } from 'lucide-react';
+import UserActivitiesModal from './UserActivitiesModal';
 
 interface DashboardViewProps {
   tasks: Task[];
   users: User[];
+  currentUser: User;
   currentDate?: Date; // Default to today
   onFilterRequest?: (status: TaskStatus | 'ALL') => void;
 }
 
-const DashboardView: React.FC<DashboardViewProps> = ({ tasks, users, currentDate = new Date(), onFilterRequest }) => {
+const DashboardView: React.FC<DashboardViewProps> = ({ tasks, users, currentUser, currentDate = new Date(), onFilterRequest }) => {
   const [activeTab, setActiveTab] = useState<'DAILY' | 'MONTHLY'>('DAILY');
   const [reportMonth, setReportMonth] = useState(new Date());
+  const [selectedUserForReport, setSelectedUserForReport] = useState<User | null>(null);
+
+  // Filter users based on role
+  const visibleUsers = users.filter(u => {
+      if (currentUser.role === 'COORDINATOR') return true;
+      return u.teamId === currentUser.teamId;
+  });
+
+  const [selectedPresenceDate, setSelectedPresenceDate] = useState(currentDate);
 
   // --- DAILY VIEW LOGIC ---
   const todayTasks = tasks.filter(t => isSameDay(new Date(t.date), currentDate));
@@ -27,9 +38,14 @@ const DashboardView: React.FC<DashboardViewProps> = ({ tasks, users, currentDate
   };
 
   const totalToday = todayTasks.length;
-  const currentDateStr = format(currentDate, 'yyyy-MM-dd');
-  const presencialUsers = users.filter(u => u.presencialDates.includes(currentDateStr));
-  const homeOfficeUsers = users.filter(u => !u.presencialDates.includes(currentDateStr));
+  
+  // Presence Logic
+  const handlePrevPresenceDate = () => setSelectedPresenceDate(prev => new Date(prev.setDate(prev.getDate() - 1)));
+  const handleNextPresenceDate = () => setSelectedPresenceDate(prev => new Date(prev.setDate(prev.getDate() + 1)));
+  
+  const presenceDateStr = format(selectedPresenceDate, 'yyyy-MM-dd');
+  const presencialUsers = visibleUsers.filter(u => u.presencialDates.includes(presenceDateStr));
+  const homeOfficeUsers = visibleUsers.filter(u => !u.presencialDates.includes(presenceDateStr));
 
   // --- MONTHLY REPORT LOGIC ---
   const handlePrevMonth = () => setReportMonth(subMonths(reportMonth, 1));
@@ -42,7 +58,7 @@ const DashboardView: React.FC<DashboardViewProps> = ({ tasks, users, currentDate
   const todoMonth = monthlyTasks.filter(t => t.status === 'TODO').length;
   const completionRate = totalMonth > 0 ? Math.round((doneMonth / totalMonth) * 100) : 0;
 
-  const userStats = users.map(user => {
+  const userStats = visibleUsers.map(user => {
     const userTasks = monthlyTasks.filter(t => t.assigneeId === user.id);
     const uDone = userTasks.filter(t => t.status === 'DONE').length;
     const uPending = userTasks.filter(t => t.status !== 'DONE').length;
@@ -65,25 +81,29 @@ const DashboardView: React.FC<DashboardViewProps> = ({ tasks, users, currentDate
     const headers = ['Titulo', 'Descricao', 'Responsavel', 'Data', 'Inicio', 'Fim', 'Status', 'Prioridade'];
     const rows = monthlyTasks.map(t => {
        const user = users.find(u => u.id === t.assigneeId);
+       // Escape double quotes by replacing " with ""
+       const escape = (str: string) => `"${(str || '').replace(/"/g, '""')}"`;
+       
        return [
-          `"${t.title.replace(/"/g, '""')}"`,
-          `"${t.description.replace(/"/g, '""')}"`,
-          `"${user ? user.name : 'N/A'}"`,
-          format(t.date, 'dd/MM/yyyy'),
+          escape(t.title),
+          escape(t.description),
+          escape(user ? user.name : 'N/A'),
+          format(new Date(t.date), 'dd/MM/yyyy'),
           t.startTime,
           t.endTime,
           STATUS_LABELS[t.status],
-          t.priority
+          t.priority || 'NORMAL'
        ].join(',');
     });
 
-    const csvContent = "data:text/csv;charset=utf-8," 
-        + headers.join(',') + "\n" 
-        + rows.join('\n');
-
-    const encodedUri = encodeURI(csvContent);
+    // Add BOM for Excel compatibility
+    const csvContent = "\uFEFF" + [headers.join(','), ...rows].join('\n');
+    
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    
     const link = document.createElement("a");
-    link.setAttribute("href", encodedUri);
+    link.setAttribute("href", url);
     link.setAttribute("download", `Relatorio_Atividades_${format(reportMonth, 'MMM_yyyy')}.csv`);
     document.body.appendChild(link);
     link.click();
@@ -192,8 +212,21 @@ const DashboardView: React.FC<DashboardViewProps> = ({ tasks, users, currentDate
 
                 {/* Presence List */}
                 <div className="bg-white rounded-xl shadow-sm border border-slate-200 flex flex-col h-fit">
-                <div className="p-4 border-b border-slate-100 font-bold text-slate-700 flex items-center gap-2">
-                    <UserCheck size={18} /> Local de Trabalho (Hoje)
+                <div className="p-4 border-b border-slate-100 font-bold text-slate-700 flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                       <UserCheck size={18} /> Local de Trabalho
+                    </div>
+                    <div className="flex items-center bg-slate-100 rounded-lg p-0.5">
+                       <button onClick={() => setSelectedPresenceDate(prev => new Date(prev.setDate(prev.getDate() - 1)))} className="p-1 hover:bg-white rounded shadow-sm transition-all text-slate-500">
+                          <ChevronLeft size={14} />
+                       </button>
+                       <span className="px-2 text-xs font-semibold text-slate-600 min-w-[80px] text-center">
+                          {isSameDay(selectedPresenceDate, new Date()) ? 'Hoje' : format(selectedPresenceDate, 'dd/MM', { locale: ptBR })}
+                       </span>
+                       <button onClick={() => setSelectedPresenceDate(prev => new Date(prev.setDate(prev.getDate() + 1)))} className="p-1 hover:bg-white rounded shadow-sm transition-all text-slate-500">
+                          <ChevronRight size={14} />
+                       </button>
+                    </div>
                 </div>
                 <div className="p-4 space-y-4 max-h-[500px] overflow-y-auto custom-scrollbar">
                     <div>
@@ -301,12 +334,16 @@ const DashboardView: React.FC<DashboardViewProps> = ({ tasks, users, currentDate
                    ) : (
                       <div className="divide-y divide-slate-100">
                          {userStats.map((stat, idx) => (
-                            <div key={stat.user.id} className="p-3 flex items-center justify-between hover:bg-slate-50 transition-colors">
+                            <div 
+                                key={stat.user.id} 
+                                onClick={() => setSelectedUserForReport(stat.user)}
+                                className="p-3 flex items-center justify-between hover:bg-slate-50 transition-colors cursor-pointer group"
+                            >
                                <div className="flex items-center gap-3">
                                   <div className="text-xs font-bold text-slate-400 w-4">{idx + 1}</div>
                                   <img src={stat.user.avatar} className="w-8 h-8 rounded-full" alt=""/>
                                   <div>
-                                     <div className="text-sm font-semibold text-slate-800">{stat.user.name}</div>
+                                     <div className="text-sm font-semibold text-slate-800 group-hover:text-indigo-600 transition-colors">{stat.user.name}</div>
                                      <div className="text-xs text-slate-500">{stat.total} demandas</div>
                                   </div>
                                </div>
@@ -334,6 +371,15 @@ const DashboardView: React.FC<DashboardViewProps> = ({ tasks, users, currentDate
         )}
 
       </div>
+      
+      {/* User Activities Modal */}
+      <UserActivitiesModal 
+         isOpen={!!selectedUserForReport}
+         onClose={() => setSelectedUserForReport(null)}
+         user={selectedUserForReport}
+         tasks={monthlyTasks.filter(t => selectedUserForReport && t.assigneeId === selectedUserForReport.id)}
+         month={reportMonth}
+      />
     </div>
   );
 };

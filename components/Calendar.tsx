@@ -54,7 +54,12 @@ const Calendar: React.FC<CalendarProps> = ({ tasks, users, teams, alertPeriods, 
 
   const getPresentUsersForDay = (date: Date) => {
       const dateStr = format(date, 'yyyy-MM-dd');
-      return users.filter(u => u.presencialDates.includes(dateStr));
+      return users.filter(u => {
+        if (!u.presencialDates.includes(dateStr)) return false;
+        
+        if (currentUser.role === 'COORDINATOR') return true;
+        return u.teamId === currentUser.teamId;
+      });
   };
 
   // Allow multiple alerts per day
